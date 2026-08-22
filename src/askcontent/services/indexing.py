@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import text
 
-from ..adapters.parsers.registry import parse_document
+from ..adapters.parsers.registry import parse_document, parser_version_for
 from ..domain.chunks import CHUNKER_VERSION, chunk_document
 from ..domain.documents import DocMetadata, DocRef, ParseHints
 from ..domain.ids import file_hash, text_hash
@@ -108,9 +108,14 @@ class IndexingService:
             existing = {
                 row.doc_id: row
                 for row in session.execute(text(f"""
-                    SELECT doc_id, text_hash, file_hash FROM {S}.document
-                    WHERE connector_id = :c
-                """), {"c": connector_id}).all()
+                    SELECT d.doc_id, d.text_hash, d.file_hash, d.parser_version,
+                           EXISTS (
+                               SELECT 1 FROM {S}.document_chunk c
+                               WHERE c.document_id = d.id
+                                 AND c.chunker_version = :chunker
+                           ) AS chunks_current
+                    FROM {S}.document d WHERE d.connector_id = :c
+                """), {"c": connector_id, "chunker": CHUNKER_VERSION}).all()
             }
 
             for meta in population[: limit or len(population)]:
@@ -133,7 +138,16 @@ class IndexingService:
 
                 fhash = file_hash(raw.blob)
                 prior = existing.get(meta.doc_id)
-                if prior is not None and prior.file_hash == fhash:
+                # Unchanged bytes are not enough. A parser or chunker upgrade
+                # changes the *output* for identical input, and skipping on the
+                # file hash alone meant an upgrade re-chunked nothing — the
+                # improvement shipped and never reached the corpus.
+                pipeline_current = (
+                    prior is not None
+                    and prior.chunks_current
+                    and prior.parser_version == parser_version_for(raw.mime)
+                )
+                if prior is not None and prior.file_hash == fhash and pipeline_current:
                     report.skipped_unchanged += 1
                     continue
 
@@ -270,17 +284,17 @@ class IndexingService:
             session.execute(text(f"""
                 INSERT INTO {S}.document_chunk (
                     org_id, connector_id, document_id, chunk_id, ordinal, text,
-                    heading_path, parent_text, page, is_table, token_estimate,
-                    chunker_version
+                    heading_path, parent_text, page, is_table, is_code,
+                    token_estimate, chunker_version
                 ) VALUES (
                     :org, :c, :d, :cid, :ord, :text, :head, :parent, :page,
-                    :table, :tokens, :cv
+                    :table, :code, :tokens, :cv
                 )
             """), {
                 "org": self.org_id, "c": connector_id, "d": document_id,
                 "cid": chunk.chunk_id, "ord": chunk.ordinal, "text": chunk.text,
                 "head": list(chunk.heading_path), "parent": chunk.parent_text,
-                "page": chunk.page, "table": chunk.is_table,
+                "page": chunk.page, "table": chunk.is_table, "code": chunk.is_code,
                 "tokens": max(1, len(chunk.text) // 4), "cv": CHUNKER_VERSION,
             })
 

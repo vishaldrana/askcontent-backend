@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict
 from .documents import Block, BlockKind, ParsedDocument
 from .ids import chunk_id
 
-CHUNKER_VERSION = "1.0.0"
+#: Bumped for overlap and code-block handling. The version participates in the
+#: embedding hash, so an upgrade re-embeds exactly the documents it changes.
+CHUNKER_VERSION = "1.1.0"
 
 
 class Chunk(BaseModel):
@@ -24,20 +26,35 @@ class Chunk(BaseModel):
     ordinal: int
     page: int | None = None
     is_table: bool = False
+    is_code: bool = False
     # Parent-child (CNT-CHK-04): the child is embedded for precision, the
     # parent is what enters the answer context for coherence.
     parent_text: str = ""
+    #: The tail of the preceding chunk.
+    #:
+    #: Held **separately from `text`** on purpose. Overlap exists so that a fact
+    #: straddling a boundary is not lost from both chunks — that is a
+    #: *retrieval* problem, so the overlap belongs in what gets embedded. It is
+    #: deliberately not part of the citation: a span repeating the previous
+    #: paragraph reads as a bug, and two adjacent citations would show the same
+    #: sentence twice.
+    overlap: str = ""
 
     @property
     def embed_text(self) -> str:
-        """Heading path is prepended before embedding (CNT-CHK-02).
+        """What is embedded: heading path, overlap, then the chunk's own text.
 
-        'Rate limits' under API > v2 and under Support > Escalation are
-        different subjects; without the path they embed almost identically.
+        The path is prepended because 'Rate limits' under API > v2 and under
+        Support > Escalation are different subjects; without it they embed
+        almost identically (CNT-CHK-02).
         """
-        if not self.heading_path:
-            return self.text
-        return " > ".join(self.heading_path) + "\n" + self.text
+        parts: list[str] = []
+        if self.heading_path:
+            parts.append(" > ".join(self.heading_path))
+        if self.overlap:
+            parts.append(self.overlap)
+        parts.append(self.text)
+        return "\n".join(parts)
 
 
 def _estimate_tokens(text: str) -> int:
@@ -46,13 +63,43 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _tail(text: str, tokens: int) -> str:
+    """The last whole sentences of a chunk, up to a token budget.
+
+    Cut on a sentence boundary rather than a character count: an overlap that
+    begins mid-clause adds noise to the embedding instead of context.
+    """
+    if tokens <= 0 or not text:
+        return ""
+    budget = tokens * 4
+    if len(text) <= budget:
+        return text
+    window = text[-budget:]
+    for separator in (". ", "? ", "! ", "\n"):
+        cut = window.find(separator)
+        if 0 <= cut < len(window) - 20:
+            return window[cut + len(separator):].strip()
+    # No sentence boundary in range. Fall back to a word boundary rather than a
+    # character count: an overlap beginning "urns a 429" contributes a token the
+    # embedder has never seen and helps nothing.
+    space = window.find(" ")
+    return window[space + 1:].strip() if space >= 0 else window.strip()
+
+
 def chunk_document(
     parsed: ParsedDocument,
     *,
     target_tokens: int = 220,
     max_tokens: int = 420,
     parent_tokens: int = 900,
+    overlap_tokens: int = 40,
 ) -> list[Chunk]:
+    """Structure-aware chunking with overlap.
+
+    A section is split on block boundaries, never mid-block; tables and code
+    blocks are atomic; each chunk carries the tail of its predecessor for
+    embedding but not for citation.
+    """
     if parsed.refused:
         return []
 
@@ -64,9 +111,10 @@ def chunk_document(
         parent_text = _render(blocks)[:parent_tokens * 4]
         buffer: list[Block] = []
         buffer_tokens = 0
+        carry = ""
 
         def flush() -> None:
-            nonlocal buffer, buffer_tokens, ordinal
+            nonlocal buffer, buffer_tokens, ordinal, carry
             if not buffer:
                 return
             text = _render(buffer)
@@ -79,10 +127,17 @@ def chunk_document(
                     ordinal=ordinal,
                     page=buffer[0].page,
                     is_table=any(b.kind is BlockKind.TABLE for b in buffer),
+                    is_code=any(b.kind is BlockKind.CODE for b in buffer),
                     parent_text=parent_text,
+                    overlap=carry,
                 )
             )
             ordinal += 1
+            # The next chunk in this section carries this one's tail. Overlap
+            # does not cross a heading boundary: two sections are two subjects,
+            # and bleeding one into the other is exactly what the heading path
+            # exists to prevent.
+            carry = _tail(text, overlap_tokens)
             buffer = []
             buffer_tokens = 0
 
@@ -90,8 +145,11 @@ def chunk_document(
             block_tokens = _estimate_tokens(block.text)
 
             # A table is never split, and an oversized one is emitted whole as
-            # its own chunk with its heading path (CNT-CHK-03).
-            if block.kind is BlockKind.TABLE:
+            # its own chunk with its heading path (CNT-CHK-03). A code block is
+            # atomic for the same reason and a sharper one: half a shell command
+            # is not a shorter shell command, it is a wrong one — and a snippet
+            # broken across chunks retrieves as neither.
+            if block.kind in (BlockKind.TABLE, BlockKind.CODE):
                 flush()
                 buffer = [block]
                 buffer_tokens = block_tokens

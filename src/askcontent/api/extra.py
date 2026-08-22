@@ -732,14 +732,66 @@ class TermCreate(BaseModel):
 
 
 @router.get("/api/connectors/{slug}/glossary")
-def list_terms(slug: str) -> list[dict]:
+def list_terms(slug: str) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rows = session.execute(text(f"""
-            SELECT id, term, definition, aliases, source, updated_at
-            FROM {S}.glossary_term WHERE connector_id = :c ORDER BY term
+            SELECT id, term, definition, aliases, source, status, method,
+                   confidence, occurrences, documents, evidence, updated_at
+            FROM {S}.glossary_term WHERE connector_id = :c
+            ORDER BY status, confidence DESC NULLS LAST, term
         """), {"c": cid}).mappings().all()
-        return [dict(r) | {"id": str(r["id"])} for r in rows]
+    terms = [dict(r) | {"id": str(r["id"])} for r in rows]
+    return {
+        "terms": terms,
+        "counts": {
+            state: sum(1 for t in terms if t["status"] == state)
+            for state in ("proposed", "confirmed", "rejected")
+        },
+    }
+
+
+@router.post("/api/connectors/{slug}/glossary/discover")
+def discover_terms(slug: str) -> dict:
+    """Propose terms from the indexed corpus.
+
+    Runs inline rather than through the worker: it reads chunks we already hold
+    and takes a second, and a reviewer who pressed the button wants the list,
+    not a job id.
+    """
+    from ..services.glossary_service import GlossaryService
+
+    return GlossaryService(_sessions(), _org_of()).discover_for(slug)
+
+
+class TermDecision(BaseModel):
+    status: str
+    definition: str | None = None
+    actor: str = "admin"
+
+
+@router.post("/api/connectors/{slug}/glossary/{term_id}/review")
+def review_term(slug: str, term_id: str, body: TermDecision) -> dict:
+    """Confirm or reject a proposal.
+
+    A rejection is stored, not deleted: the next discovery run would otherwise
+    propose the same term again, and a reviewer who has already said no should
+    not have to keep saying it.
+    """
+    if body.status not in ("confirmed", "rejected"):
+        raise HTTPException(400, "status must be confirmed or rejected")
+    with _sessions()() as session:
+        _connector_id(session, slug)
+        session.execute(text(f"""
+            UPDATE {S}.glossary_term
+            SET status = :s, reviewed_by = :who, reviewed_at = now(),
+                definition = coalesce(:definition, definition),
+                source = CASE WHEN :s = 'confirmed' THEN 'human' ELSE source END
+            WHERE id = :t
+        """), {"s": body.status, "who": body.actor, "t": term_id,
+               "definition": body.definition})
+        session.commit()
+    return {"id": term_id, "status": body.status}
 
 
 @router.post("/api/connectors/{slug}/glossary")

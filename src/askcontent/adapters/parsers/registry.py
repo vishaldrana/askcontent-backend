@@ -26,6 +26,18 @@ SUPPORTED_MIMES = ("application/pdf", "text/html")
 _PARSERS = (HtmlParser(), PdfParser())
 
 
+def parser_version_for(mime: str) -> str:
+    """The version the current parser would stamp on this content type.
+
+    Exposed here so callers can ask "would a re-parse produce different output?"
+    without importing a parser. The registry is the façade; reaching past it to
+    `parsers.pdf` is the vendor-isolation break the architecture test exists to
+    catch, and it caught exactly that.
+    """
+    parser = next((p for p in _PARSERS if p.supports(mime)), None)
+    return parser.parser_version if parser else "-"
+
+
 def capabilities() -> dict[str, bool]:
     """What this deployment can actually parse right now.
 

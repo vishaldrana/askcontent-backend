@@ -437,3 +437,81 @@ shifts a date by up to eleven months.
   * Uploads have no ECM row, so enrichment counted every one as `unreadable` —
     a permanent false number on the review screen. They are skipped and counted
     separately.
+
+---
+
+## 2026-08-22 · Chunk overlap, and terms the corpus already knows
+
+### Overlap is embedded, not cited
+
+A fact straddling a chunk boundary was in neither chunk. Each chunk now carries
+the tail of its predecessor — cut on a sentence boundary, or a word boundary
+where no sentence break is in range, because an overlap beginning `urns a 429`
+contributes a token the embedder has never seen.
+
+The overlap is held **separately from the chunk's text** and appears only in
+`embed_text`. Overlap solves a *retrieval* problem, so it belongs in what is
+embedded; putting it in the citation would make two adjacent citations show the
+same sentence twice, which reads as a bug.
+
+Overlap does not cross a heading boundary. Two sections are two subjects, and
+bleeding one into the other is exactly what the heading path exists to prevent.
+
+Code blocks are now atomic, like tables. Half a shell command is not a shorter
+shell command, it is a wrong one — and a snippet split across chunks retrieves
+as neither.
+
+### The incremental skip outranked correctness
+
+Bumping the chunker version re-chunked **nothing**: the file-hash check fired
+first, and unchanged bytes short-circuited before any version was compared. The
+improvement shipped and never reached the corpus.
+
+The skip now requires unchanged bytes **and** a current parser version **and**
+chunks already written at the current chunker version. Re-running after the
+version bump re-chunked all 483 chunks; the run after that skipped everything.
+
+### Glossary terms are proposed, not typed
+
+A glossary you must hand-write is a glossary nobody writes. Terms are extracted
+from the indexed chunks by three routes, and each carries the sentences it came
+from:
+
+| Route | Confidence | Example |
+|---|---|---|
+| Acronym with its expansion in brackets | 0.92–0.96 | `KYC` → Know Your Customer |
+| A sentence that defines something outright | ~0.77 | "Structuring means…" |
+| A repeated acronym with no expansion anywhere | ~0.5 | `SLO`, flagged as needing a definition |
+
+The third route never invents a definition. Term resolution exists to stop the
+system substituting a plausible synonym for a term the corpus does not contain;
+a platform that writes its own definitions defeats the feature it is feeding.
+
+Confirming a proposal requires a definition — a term without one resolves
+nothing. A rejection is stored rather than deleted, so the next scan does not
+propose it again; a reviewer who has said no should not have to keep saying it.
+
+### Three false positives, and what each was really about
+
+**`POST`.** An HTTP verb from `POST /v2/payments`. Filtering code chunks was not
+enough, because that line is a paragraph, not a code block — so the chunker now
+records `is_code` and discovery reads prose only, *and* a short, explicitly
+labelled list catches the verbs that appear in prose. A longer keyword file
+would be a guess that needs extending forever; the reviewer's dismissal is the
+general mechanism.
+
+**`existing resource`.** From "A 404 for an existing resource means the caller
+lacks visibility" — the article was matched mid-sentence and the real subject
+skipped. The pattern is now anchored to a sentence start. A definition naming
+the wrong thing is worse than none.
+
+**`KYC` at two documents.** A frequency-only proposal now needs three distinct
+documents. Two proposed too much noise on a technical corpus.
+
+### The architecture test earned its keep
+
+Comparing parser versions, I imported `adapters.parsers.pdf` from a service —
+and `test_the_services_layer_imports_no_adapter` failed on the next run. The
+registry now exposes `parser_version_for`, and the boundary holds: the façade is
+the seam, and reaching past it is the vendor-isolation break the test exists to
+catch.
