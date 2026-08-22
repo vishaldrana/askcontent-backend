@@ -52,6 +52,10 @@ def _org(session) -> uuid.UUID:
     return _platform().registry.org_id
 
 
+def _org_of() -> uuid.UUID:
+    return _platform().registry.org_id
+
+
 def _sessions():
     from ..db.session import get_session_factory
 
@@ -149,7 +153,22 @@ def add_rule(slug: str, body: RuleCreate) -> dict:
                "config": json.dumps(body.config),
                "enum": body.kind in ENUMERABLE_KINDS}).scalar_one()
         session.commit()
-        return {"id": str(rid), "ordinal": ordinal, "enumerable": body.kind in ENUMERABLE_KINDS}
+
+    # The request returns; the worker does the work. Materialising fetches and
+    # parses every member, which is not a thing to do inside an HTTP request.
+    from ..worker import enqueue
+
+    job = enqueue(
+        _sessions(), _org_of(), "collection.materialise",
+        collection_id=collection["id"], payload={"collection": slug},
+    )
+    return {
+        "id": str(rid), "ordinal": ordinal,
+        "enumerable": body.kind in ENUMERABLE_KINDS,
+        "job_id": job,
+        "note": "Queued. The worker materialises the collection, then enriches "
+                "each member with its title, description and dates.",
+    }
 
 
 @router.delete("/api/collections/{slug}/rules/{rule_id}")
@@ -413,6 +432,103 @@ def _evaluate(platform, rule) -> tuple[list[dict], bool]:
     # similar_to, link_expansion and crawl are specified and not yet built. An
     # empty result with the rule visible is honest; a fabricated one is not.
     return [], False
+
+
+@router.get("/api/collections/{slug}/detail")
+def collection_detail(slug: str) -> dict:
+    """Everything a reviewer needs to judge a knowledgebase.
+
+    Per rule: what was entered, and what it found. Per page: what it is, when it
+    was written, when it last changed — and **where each date came from**, since
+    many sources supply none and the value is then recovered from the text.
+    """
+    with _sessions()() as session:
+        collection = _collection_row(session, slug)
+
+        rules = session.execute(text(f"""
+            SELECT id, ordinal, kind, effect, config, enumerable, last_run_at,
+                   last_candidate_count, capped
+            FROM {S}.collection_rule WHERE collection_id = :c ORDER BY ordinal
+        """), {"c": collection["id"]}).mappings().all()
+
+        members = session.execute(text(f"""
+            SELECT doc_id, kb_id, title, description, url, space, path, owner,
+                   doc_type, contributed_by, resolved_via, resolve_score, state,
+                   pinned, source_created_at, source_updated_at, created_source,
+                   updated_source, date_evidence, first_seen_at, last_checked_at,
+                   last_changed_at, missing_since
+            FROM {S}.collection_member WHERE collection_id = :c
+            ORDER BY state, title NULLS LAST, doc_id
+        """), {"c": collection["id"]}).mappings().all()
+
+        jobs = session.execute(text(f"""
+            SELECT kind, status, progress, error, attempts, created_at, finished_at
+            FROM {S}.job WHERE collection_id = :c
+            ORDER BY created_at DESC LIMIT 8
+        """), {"c": collection["id"]}).mappings().all()
+
+    by_rule = {str(r["id"]): dict(r) | {"id": str(r["id"]), "found": 0} for r in rules}
+    for member in members:
+        for rule_id in member["contributed_by"] or []:
+            if rule_id in by_rule:
+                by_rule[rule_id]["found"] += 1
+
+    return {
+        "collection": dict(collection) | {"id": str(collection["id"])},
+        "rules": list(by_rule.values()),
+        "members": [
+            dict(m) | {
+                "contributed_by_kinds": [
+                    by_rule[x]["kind"] if x in by_rule else "removed rule"
+                    for x in (m["contributed_by"] or [])
+                ],
+            }
+            for m in members
+        ],
+        "jobs": [dict(j) for j in jobs],
+        "counts": {
+            "members": sum(1 for m in members if m["state"] == "member"),
+            "proposed": sum(1 for m in members if m["state"] == "proposed"),
+            "removed": sum(1 for m in members if m["state"] == "removed"),
+            "dates_from_content": sum(1 for m in members if m["updated_source"] == "content"),
+            "dates_missing": sum(1 for m in members if m["updated_source"] == "none"),
+            "never_checked": sum(1 for m in members if m["last_checked_at"] is None),
+        },
+    }
+
+
+class JobRequest(BaseModel):
+    kind: str = "collection.refresh"
+    connector: str | None = None
+
+
+@router.post("/api/collections/{slug}/jobs")
+def enqueue_job(slug: str, body: JobRequest) -> dict:
+    """Ask a worker to do something: materialise, enrich, or check for updates."""
+    from ..worker import enqueue
+
+    if body.kind not in ("collection.materialise", "collection.enrich", "collection.refresh"):
+        raise HTTPException(400, f"unknown job kind {body.kind}")
+    with _sessions()() as session:
+        collection = _collection_row(session, slug)
+    job = enqueue(
+        _sessions(), _org_of(), body.kind, collection_id=collection["id"],
+        payload={"collection": slug, "connector": body.connector},
+    )
+    return {"job_id": job, "kind": body.kind, "status": "queued"}
+
+
+@router.get("/api/jobs")
+def list_jobs(limit: int = 20) -> list[dict]:
+    with _sessions()() as session:
+        rows = session.execute(text(f"""
+            SELECT j.id, j.kind, j.status, j.attempts, j.error, j.progress,
+                   j.created_at, j.started_at, j.finished_at, j.locked_by,
+                   c.slug AS collection
+            FROM {S}.job j LEFT JOIN {S}.collection c ON c.id = j.collection_id
+            WHERE j.org_id = :o ORDER BY j.created_at DESC LIMIT :n
+        """), {"o": _org(session), "n": limit}).mappings().all()
+        return [dict(r) | {"id": str(r["id"])} for r in rows]
 
 
 @router.get("/api/collections/{slug}/members")

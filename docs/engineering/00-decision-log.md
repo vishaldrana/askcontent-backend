@@ -365,3 +365,75 @@ The platform must be able to index a document that only one group may later
 read, or the corpus is limited to what everyone can see. So the ingest
 credential reads broadly — and that is precisely why the retrieval gate
 re-checks per user on every question. Conflating the two is the leak.
+
+---
+
+## 2026-08-22 · Workers, and dates that only exist in the text
+
+### Adding a knowledgebase enqueues work; it does not do it
+
+Materialising a collection fetches and parses every member. Measured on the
+fixture: 2.5 s to materialise 34 documents and 9.7 s to enrich them. That is not
+a thing to do inside an HTTP request, and the first realistic corpus would have
+made it a timeout rather than a slow page.
+
+Adding a rule now returns a job id. The worker claims jobs with
+`FOR UPDATE SKIP LOCKED`, so several can run against one queue without
+coordinating and without two of them doing the same job. A failure retries with
+exponential backoff to an attempt limit and then stays `failed` **with its
+error** — a job that vanishes looks exactly like one that succeeded.
+
+Enqueueing is idempotent while a job is still queued: adding three rules to a
+collection schedules one materialisation, not three.
+
+### The chain
+
+    rule added → collection.materialise → collection.enrich
+    collection.refresh → (only if content moved) → connector.index
+
+Verified end to end. Editing `$35` to `$40` in the fee schedule at source:
+
+    collection.refresh   checked 34, changed 1, gone 2, unchanged 31
+    connector.index      2 parsed, 29 unchanged, 8 chunks, 8 embedded
+
+The answer then cites $40. Twenty-nine untouched documents were neither
+re-parsed nor re-embedded.
+
+### Change is detected by content hash, not by a reported date
+
+A source that does not maintain a modified date is exactly the source whose
+dates cannot be trusted to signal a change — and one that does maintain it can
+still touch the date without changing a word. The hash answers the question
+that was actually asked.
+
+### Many documents carry their dates only in prose
+
+"Effective date: 14 April 2026. Last reviewed: 2 June 2026." is a document
+control block, and for a great deal of policy content it is the *only* date
+there is. Without reading it, a page that plainly states when it took effect is
+`unknown_age` forever.
+
+Two rules make this safe:
+
+  * **Provenance travels with the value.** `metadata` / `content` / `none` is
+    stored per date and shown in the review table, along with the sentence the
+    value was read from. A date recovered from prose is weaker evidence, and a
+    reviewer deciding whether a policy is current must be able to tell.
+  * **Only labelled dates are taken.** A bare date in a body is far more likely
+    to be a deadline, an example or a statutory citation than the document's own
+    currency. Twenty-six labels are recognised; an unlabelled date is ignored.
+
+`01/03/2026` is read day-first, and that choice is stated rather than assumed:
+the deployments this is built for are not US-only, and a wrong reading silently
+shifts a date by up to eleven months.
+
+### Three SQL bugs worth naming
+
+  * `:c::text` — SQLAlchemy's `text()` reads the second colon as the start of
+    another bind parameter, and the statement reaches Postgres malformed. Use
+    `CAST(... AS text)`.
+  * The same parameter used as a value *and* inside a comparison gets
+    conflicting types deduced (`AmbiguousParameter`). Cast it explicitly.
+  * Uploads have no ECM row, so enrichment counted every one as `unreadable` —
+    a permanent false number on the review screen. They are skipped and counted
+    separately.
