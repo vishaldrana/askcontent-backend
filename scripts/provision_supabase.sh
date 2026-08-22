@@ -25,22 +25,48 @@ SUPABASE="npx --yes supabase@latest"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-[[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]] || die \
-  "SUPABASE_ACCESS_TOKEN is not set. Create one at
-   https://supabase.com/dashboard/account/tokens then:
-     export SUPABASE_ACCESS_TOKEN=sbp_..."
+# Auth comes from either `supabase login` (stored in the CLI config) or an
+# access token in the environment. Check by asking, rather than by inspecting
+# config paths that differ across platforms.
+if ! $SUPABASE projects list >/dev/null 2>&1; then
+  die "not authenticated. Run:  npx supabase login
+   ...or set SUPABASE_ACCESS_TOKEN from
+   https://supabase.com/dashboard/account/tokens"
+fi
 
-[[ -n "${SUPABASE_DB_PASSWORD:-}" ]] || die \
-  "SUPABASE_DB_PASSWORD is not set. Choose a strong password; it is the
-   database password for the project."
+# The database password is generated if not supplied, and printed once at the
+# end. A password chosen under time pressure is a password that ends up in a
+# shell history.
+if [[ -z "${SUPABASE_DB_PASSWORD:-}" ]]; then
+  SUPABASE_DB_PASSWORD="$(python3 -c "import secrets,string;a=string.ascii_letters+string.digits;print(''.join(secrets.choice(a) for _ in range(32)))")"
+  GENERATED_PASSWORD=1
+fi
+export SUPABASE_DB_PASSWORD
 
 # -- 1. project ---------------------------------------------------------------
 if [[ -z "${SUPABASE_PROJECT_REF:-}" ]]; then
+  # One organisation is the common case and needs no input. Several is
+  # ambiguous, and guessing which one a project lands in is not a guess worth
+  # making on someone's behalf.
+  if [[ -z "${SUPABASE_ORG_ID:-}" ]]; then
+    ORGS_JSON="$($SUPABASE orgs list --output json)"
+    ORG_COUNT="$(echo "$ORGS_JSON" | python3 -c "import json,sys;print(len(json.load(sys.stdin)))")"
+    if [[ "$ORG_COUNT" == "1" ]]; then
+      ORG_ID="$(echo "$ORGS_JSON" | python3 -c "import json,sys;print(json.load(sys.stdin)[0]['id'])")"
+      echo "==> using the only organisation: $ORG_ID"
+    else
+      echo "$ORGS_JSON" | python3 -c "import json,sys;[print(f\"  {o['id']}  {o['name']}\") for o in json.load(sys.stdin)]"
+      die "several organisations found. Choose one:  export SUPABASE_ORG_ID=<id>"
+    fi
+  else
+    ORG_ID="$SUPABASE_ORG_ID"
+  fi
+
   echo "==> creating project '$PROJECT_NAME' in $REGION"
   $SUPABASE projects create "$PROJECT_NAME" \
     --region "$REGION" \
     --db-password "$SUPABASE_DB_PASSWORD" \
-    --org-id "${SUPABASE_ORG_ID:?set SUPABASE_ORG_ID — list them with: npx supabase orgs list}"
+    --org-id "$ORG_ID"
   SUPABASE_PROJECT_REF="$($SUPABASE projects list --output json \
     | python3 -c "import json,sys;print(next(p['id'] for p in json.load(sys.stdin) if p['name']=='$PROJECT_NAME'))")"
   echo "==> project ref: $SUPABASE_PROJECT_REF"
@@ -111,7 +137,10 @@ SQL
 cat <<MSG
 
 Done.
-
+${GENERATED_PASSWORD:+
+  Generated database password (shown once — store it now):
+    $SUPABASE_DB_PASSWORD
+}
   export ASKCONTENT_DATABASE_URL='$ASKCONTENT_DATABASE_URL'
   export ASKCONTENT_MIGRATION_DATABASE_URL='$ASKCONTENT_MIGRATION_DATABASE_URL'
 
