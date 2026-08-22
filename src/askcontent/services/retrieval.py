@@ -1,0 +1,620 @@
+"""The two-stage retrieval pipeline (CNT-RET-01).
+
+    ① Plan     model fills a RetrievalSpec; scope_ref is an identifier
+    ② Compile  scope ∩ principal permissions -> concrete index filters
+    ③ Candidates  PGP and ECM in parallel, per-channel k
+    ④ Resolution  dedupe, re-apply both gates against ECM metadata, drop
+    ⑤ Passages    fetch -> parse -> chunk -> select
+    ⑥ Rerank      cross-encoder, diversity cap, context budget, citations
+
+Every drop is attributed to exactly one named rule (CNT-ADM-10). Without
+per-stage attribution, tuning a content pipeline is superstition.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+from pydantic import BaseModel, Field
+
+from ..domain.catalog import assign_authority, staleness
+from ..domain.chunks import Chunk
+from ..domain.documents import (
+    AuthorityTier,
+    DocMetadata,
+    DocRef,
+    Staleness,
+)
+from ..domain.ids import plan_hash
+from ..domain.retrieval_spec import Channel, RetrievalSpec
+from ..domain.scope import ExclusionRule, KnowledgeScope, evaluate
+from ..ports.content_index import IndexFilters, IndexUnavailable
+from ..ports.content_repository import RepositoryUnavailable, ResolutionOutcome
+from .mapping import apply_map
+from .registry import Connector, ConnectorState
+
+NOW = dt.datetime(2026, 8, 22, 12, 0, 0)
+
+
+# --------------------------------------------------------------------------
+# Trace — CNT-ADM-09. Rendered as-is by /connectors/:id/diagnose, and
+# available for any production answer subject to permission (CNT-ADM-11).
+# --------------------------------------------------------------------------
+
+
+class ChannelTrace(BaseModel):
+    channel: str
+    hits: int = 0
+    latency_ms: float = 0.0
+    error: str | None = None
+    top: tuple[str, ...] = ()
+
+
+class CandidateTrace(BaseModel):
+    doc_id: str
+    title: str | None = None
+    channel_ranks: dict[str, int] = Field(default_factory=dict)
+    fusion_score: float = 0.0
+    fusion_rank: int | None = None
+    resolution: str | None = None
+    dropped_by: str | None = None
+    drop_detail: str | None = None
+    chunks_selected: int = 0
+    cache_hit: bool | None = None
+    parse_path: str | None = None
+    parse_quality: dict[str, object] = Field(default_factory=dict)
+    rerank_score: float | None = None
+    rerank_rank: int | None = None
+    authority: str | None = None
+    staleness: str | None = None
+
+
+class RetrievalTrace(BaseModel):
+    spec_json: str
+    plan_hash: str
+    filters: dict[str, object]
+    channels: tuple[ChannelTrace, ...] = ()
+    candidates: tuple[CandidateTrace, ...] = ()
+    degraded: tuple[str, ...] = ()
+    stale_index_count: int = 0
+    forbidden_count: int = 0
+    cache_hit_rate: float = 0.0
+    total_ms: float = 0.0
+    refusal: str | None = None
+
+
+class Citation(BaseModel):
+    chunk_id: str
+    doc_id: str
+    title: str
+    url: str
+    space: str | None
+    owner: str | None
+    authority: AuthorityTier
+    updated_at: dt.datetime | None
+    staleness: Staleness
+    heading_path: tuple[str, ...]
+    span: str
+    rerank_score: float
+    fusion_rank: int
+
+
+class Conflict(BaseModel):
+    """Two authoritative sources that disagree are both shown, with dates and
+    owners (CNT-RET-20). The system does not pick."""
+
+    subject: str
+    citations: tuple[Citation, ...]
+
+
+class Evidence(BaseModel):
+    citations: tuple[Citation, ...]
+    conflicts: tuple[Conflict, ...] = ()
+    notices: tuple[str, ...] = ()
+    trace: RetrievalTrace
+    refused: bool = False
+    refusal_reason: str | None = None
+
+
+# --------------------------------------------------------------------------
+
+
+class RetrievalService:
+    def __init__(self, index, repository, embedder, reranker, passages) -> None:
+        self.index = index
+        self.repository = repository
+        self.embedder = embedder
+        self.reranker = reranker
+        self.passages = passages
+
+    # -- ② compile ---------------------------------------------------------
+
+    def compile_filters(self, connector: Connector, principal: str) -> IndexFilters:
+        """Scope ∩ permissions, pushed into the query.
+
+        Never applied to a result set afterwards (CNT-SCP-14): post-filtering
+        means excluded documents influenced ranking, occupied the k budget, and
+        were present in process memory.
+        """
+        scope = connector.scope
+        spaces = tuple(r.value for r in scope.roots if r.kind == "space")
+        return IndexFilters(
+            spaces=spaces,
+            labels_any=scope.labels_any,
+            labels_none=scope.labels_none,
+            doc_types=tuple(str(t) for t in scope.doc_types),
+            updated_after=scope.updated_after,
+            updated_before=scope.updated_before,
+            principals=(principal,),
+        )
+
+    # -- the pipeline ------------------------------------------------------
+
+    def retrieve(
+        self, connector: Connector, spec: RetrievalSpec, principal: str
+    ) -> Evidence:
+        started = time.perf_counter()
+        config = connector.retrieval
+        filters = self.compile_filters(connector, principal)
+
+        trace = RetrievalTrace(
+            spec_json=spec.canonical_json(),
+            plan_hash=plan_hash(
+                spec.canonical_json(),
+                self.reranker.reranker_id,
+                self.reranker.reranker_version,
+            ),
+            filters=filters.model_dump(mode="json"),
+        )
+
+        if connector.state is not ConnectorState.ACTIVE:
+            trace.refusal = f"connector is {connector.state}"
+            return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
+
+        # ③ candidate generation ------------------------------------------
+        channel_results, channel_traces, degraded = self._generate_candidates(
+            connector, spec, filters, principal, config
+        )
+        trace.channels = tuple(channel_traces)
+        trace.degraded = tuple(degraded)
+
+        if not channel_results:
+            trace.refusal = "no candidates from any channel"
+            trace.total_ms = (time.perf_counter() - started) * 1000
+            return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
+
+        # fusion by rank, never by raw score (CNT-RET-04) ------------------
+        fused = _reciprocal_rank_fusion(channel_results, k=config.rrf_constant)
+
+        candidates: dict[str, CandidateTrace] = {}
+        for rank, (doc_id, score, channel_ranks) in enumerate(fused, start=1):
+            candidates[doc_id] = CandidateTrace(
+                doc_id=doc_id,
+                channel_ranks=channel_ranks,
+                fusion_score=round(score, 6),
+                fusion_rank=rank,
+            )
+
+        # ④ resolution -----------------------------------------------------
+        resolved: list[tuple[DocMetadata, CandidateTrace]] = []
+        for doc_id, candidate in candidates.items():
+            metadata = self._resolve(connector, doc_id, principal, candidate, trace)
+            if metadata is not None:
+                resolved.append((metadata, candidate))
+
+        if not resolved:
+            trace.candidates = tuple(candidates.values())
+            trace.refusal = "every candidate was dropped at resolution"
+            trace.total_ms = (time.perf_counter() - started) * 1000
+            return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
+
+        # ⑤ passage recovery -----------------------------------------------
+        question_vector = self.embedder.embed_query(spec.question)
+        passage_pool: list[tuple[Chunk, DocMetadata, CandidateTrace]] = []
+
+        for metadata, candidate in resolved:
+            candidate.title = metadata.title
+            before = self.passages.stats.hits
+            try:
+                entry = self.passages.load(
+                    DocRef(doc_id=metadata.doc_id, kb_id=metadata.kb_id),
+                    metadata,
+                    principal,
+                )
+            except RepositoryUnavailable as exc:
+                candidate.dropped_by = "fetch_unavailable"
+                candidate.drop_detail = str(exc)
+                continue
+
+            candidate.cache_hit = self.passages.stats.hits > before
+            candidate.parse_path = str(entry.parsed.parse_path)
+            candidate.parse_quality = entry.parsed.quality.model_dump(mode="json")
+
+            if entry.parsed.refused:
+                # A document we cannot read reliably is reported, not indexed
+                # at low confidence (CNT-PAR-11).
+                candidate.dropped_by = "parse_refused"
+                candidate.drop_detail = entry.parsed.refusal_reason
+                continue
+
+            selected = self.passages.select(
+                question_vector, entry.chunks, config.passages_per_document
+            )
+            candidate.chunks_selected = len(selected)
+            for chunk, _score in selected:
+                passage_pool.append((chunk, metadata, candidate))
+
+        if not passage_pool:
+            trace.candidates = tuple(candidates.values())
+            trace.refusal = "no passages could be recovered from any resolved document"
+            trace.cache_hit_rate = self.passages.stats.hit_rate
+            trace.total_ms = (time.perf_counter() - started) * 1000
+            return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
+
+        # ⑥ rerank ----------------------------------------------------------
+        texts = [chunk.embed_text for chunk, _, _ in passage_pool]
+        try:
+            ranked = self.reranker.rerank(spec.question, texts)
+        except Exception as exc:  # noqa: BLE001
+            # Degrade to fusion order rather than failing the answer
+            # (CNT-RNK-04).
+            degraded.append(f"reranker unavailable ({exc}); fusion order used")
+            trace.degraded = tuple(degraded)
+            ranked = [
+                type("R", (), {"index": i, "score": 1.0 / (1 + i)})()
+                for i in range(len(texts))
+            ]
+
+        citations, conflicts, notices = self._assemble(
+            spec, connector, ranked, passage_pool, candidates, config
+        )
+
+        trace.candidates = tuple(candidates.values())
+        trace.cache_hit_rate = round(self.passages.stats.hit_rate, 4)
+        trace.total_ms = round((time.perf_counter() - started) * 1000, 2)
+
+        if not citations:
+            # An answer with no passage above the floor is a refusal, not a
+            # low-confidence answer (CNT-RNK-07).
+            trace.refusal = (
+                f"no passage scored above the reranker floor ({config.rerank_floor})"
+            )
+            return Evidence(
+                citations=(), trace=trace, refused=True, refusal_reason=trace.refusal,
+                notices=tuple(notices),
+            )
+
+        return Evidence(
+            citations=tuple(citations),
+            conflicts=tuple(conflicts),
+            notices=tuple(notices),
+            trace=trace,
+        )
+
+    # -- ③ ------------------------------------------------------------------
+
+    def _generate_candidates(self, connector, spec, filters, principal, config):
+        """Both channels always (CNT-RET-03). They have complementary blind
+        spots, and the vector-only failure is the one users notice: an exact
+        error code returns thematically similar documents that do not contain
+        it."""
+        channel_results: dict[str, list[str]] = {}
+        traces: list[ChannelTrace] = []
+        degraded: list[str] = []
+
+        def run_pgp() -> tuple[list[str], float, str | None]:
+            start = time.perf_counter()
+            try:
+                page = self.index.search(
+                    connector.kb_id, spec.question, filters, k=config.k_per_channel
+                )
+                doc_ids = [hit.doc_id for hit in page.hits]
+                # Pagination: real indexes do not return everything at once.
+                while page.cursor and len(doc_ids) < config.k_per_channel:
+                    page = self.index.search(
+                        connector.kb_id, spec.question, filters,
+                        k=config.k_per_channel, cursor=page.cursor,
+                    )
+                    doc_ids.extend(hit.doc_id for hit in page.hits)
+                return doc_ids[: config.k_per_channel], (time.perf_counter() - start) * 1000, None
+            except IndexUnavailable as exc:
+                return [], (time.perf_counter() - start) * 1000, str(exc)
+
+        def run_ecm() -> tuple[list[str], float, str | None]:
+            start = time.perf_counter()
+            try:
+                refs = self.repository.search(
+                    spec.question, principal, k=config.k_per_channel,
+                    spaces=filters.spaces,
+                )
+                return [r.doc_id for r in refs], (time.perf_counter() - start) * 1000, None
+            except RepositoryUnavailable as exc:
+                return [], (time.perf_counter() - start) * 1000, str(exc)
+
+        runners = {}
+        if Channel.PGP in config.channels:
+            runners["pgp"] = run_pgp
+        if Channel.ECM in config.channels:
+            runners["ecm"] = run_ecm
+
+        with ThreadPoolExecutor(max_workers=max(1, len(runners))) as pool:
+            futures = {name: pool.submit(fn) for name, fn in runners.items()}
+            for name, future in futures.items():
+                try:
+                    doc_ids, latency, error = future.result(
+                        timeout=config.channel_timeout_seconds
+                    )
+                except FutureTimeout:
+                    doc_ids, latency, error = [], config.channel_timeout_seconds * 1000, "timeout"
+
+                traces.append(
+                    ChannelTrace(
+                        channel=name, hits=len(doc_ids), latency_ms=round(latency, 2),
+                        error=error, top=tuple(doc_ids[:5]),
+                    )
+                )
+                if error:
+                    # Visible degradation, never silent narrowing (CNT-RET-05,
+                    # CNT-CON-13).
+                    degraded.append(f"{name} channel unavailable: {error}")
+                elif doc_ids:
+                    channel_results[name] = doc_ids
+
+        return channel_results, traces, degraded
+
+    # -- ④ ------------------------------------------------------------------
+
+    def _resolve(
+        self, connector: Connector, doc_id: str, principal: str,
+        candidate: CandidateTrace, trace: RetrievalTrace,
+    ) -> DocMetadata | None:
+        ref = DocRef(doc_id=doc_id, kb_id=connector.kb_id)
+        try:
+            resolution = self.repository.fetch_metadata(ref, principal)
+        except RepositoryUnavailable as exc:
+            candidate.resolution = "unavailable"
+            candidate.dropped_by = "ecm_unavailable"
+            candidate.drop_detail = str(exc)
+            return None
+
+        candidate.resolution = str(resolution.outcome)
+
+        if resolution.outcome is ResolutionOutcome.NOT_FOUND:
+            # PGP holds an id the ECM no longer has. Aggregated per KB as the
+            # index-health metric (CNT-RET-07).
+            trace.stale_index_count += 1
+            candidate.dropped_by = "stale_index"
+            return None
+
+        if resolution.outcome is ResolutionOutcome.FORBIDDEN:
+            # Dropped *before* ranking. Its existence is never disclosed
+            # (CNT-ACL-04).
+            trace.forbidden_count += 1
+            candidate.dropped_by = "forbidden"
+            return None
+
+        if resolution.metadata is None:
+            candidate.dropped_by = "no_metadata"
+            return None
+
+        metadata = resolution.metadata
+
+        # The retrieval gate: current scope, against ECM metadata, never
+        # against an in_scope flag written at ingest and never against the
+        # index's cached copy (CNT-SCP-11, CNT-RET-08).
+        decision = evaluate(connector.scope, metadata)
+        if not decision.in_scope:
+            candidate.dropped_by = str(decision.rule)
+            candidate.drop_detail = decision.detail
+            return None
+
+        state = staleness(metadata, connector.retrieval.freshness, NOW)
+        tier, _why = assign_authority(
+            metadata, list(connector.authority_rules), connector.authority_pins, state
+        )
+        candidate.authority = str(tier)
+        candidate.staleness = str(state)
+
+        if tier is AuthorityTier.ARCHIVE:
+            candidate.dropped_by = "archive_tier"
+            candidate.drop_detail = f"staleness={state}"
+            return None
+
+        return metadata.model_copy(update={"authority": tier})
+
+    # -- ⑥ ------------------------------------------------------------------
+
+    def _assemble(self, spec, connector, ranked, passage_pool, candidates, config):
+        citations: list[Citation] = []
+        notices: list[str] = []
+        per_document: dict[str, int] = {}
+        seen_texts: set[str] = set()
+
+        for rank, result in enumerate(ranked, start=1):
+            if result.score < config.rerank_floor:
+                continue
+            if len(citations) >= config.context_budget_chunks:
+                break
+
+            chunk, metadata, candidate = passage_pool[result.index]
+
+            # Cross-source near-duplicate collapse (CNT-PAR-21). Where the same
+            # material exists in two places the canonical copy is cited; citing
+            # the shadow copy makes the answer diverge from the system of
+            # record the reader will open.
+            fingerprint = _fingerprint(chunk.text)
+            if fingerprint in seen_texts:
+                continue
+            seen_texts.add(fingerprint)
+
+            if per_document.get(metadata.doc_id, 0) >= config.passages_per_document:
+                continue
+            per_document[metadata.doc_id] = per_document.get(metadata.doc_id, 0) + 1
+
+            candidate.rerank_score = round(float(result.score), 6)
+            candidate.rerank_rank = rank
+
+            state = staleness(metadata, config.freshness, NOW)
+            citations.append(
+                Citation(
+                    chunk_id=chunk.chunk_id,
+                    doc_id=metadata.doc_id,
+                    title=metadata.title,
+                    # The link opens the document in the ECM, not in our copy
+                    # (CNT-RET-19): our parsed copy can be stale, and sending
+                    # the user there makes us the system of record for content
+                    # we do not own.
+                    url=metadata.url,
+                    space=metadata.space,
+                    owner=metadata.owner,
+                    authority=metadata.authority,
+                    updated_at=metadata.updated_at,
+                    staleness=state,
+                    heading_path=chunk.heading_path,
+                    span=chunk.text[:600],
+                    rerank_score=round(float(result.score), 6),
+                    fusion_rank=candidate.fusion_rank or 0,
+                )
+            )
+
+        conflicts = _detect_conflicts(citations)
+
+        stale = [c for c in citations if c.staleness in (Staleness.STALE, Staleness.EXPIRED)]
+        if stale:
+            oldest = min(stale, key=lambda c: c.updated_at or NOW)
+            notices.append(
+                f"Best supporting evidence includes '{oldest.title}', last updated "
+                f"{oldest.updated_at:%d %b %Y}" if oldest.updated_at else
+                f"Best supporting evidence includes '{oldest.title}', which has no recorded date"
+            )
+        unknown = [c for c in citations if c.staleness is Staleness.UNKNOWN_AGE]
+        if unknown:
+            notices.append(
+                f"{len(unknown)} cited document(s) have no parseable date; treat their "
+                "currency as unverified and check the field map."
+            )
+
+        return citations, conflicts, notices
+
+
+def _fingerprint(text: str) -> str:
+    import hashlib
+    import re
+
+    normalised = " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+    return hashlib.blake2b(normalised.encode(), digest_size=12).hexdigest()
+
+
+_CLAIM = __import__("re").compile(r"\b(\d+(?:\.\d+)?)\s+([a-z%][a-z]{1,14})\b", __import__("re").I)
+_CLAIM_STOP = frozenset(
+    "the a an of to and or in on for with by from at as is are was were be per "
+    "and following within least most more than about over under".split()
+)
+
+
+def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
+    """Quantified claims that disagree across *different documents*.
+
+    A claim is a number followed by a unit ("18 weeks", "60 days", "45 per"),
+    together with the significant terms around it. Two claims conflict when
+    they share a unit and enough surrounding terms to be about the same thing,
+    and give different values.
+
+    Deliberately narrow and deterministic — no model call (CNT-PAR-06). It is
+    not a general contradiction detector and does not pretend to be. Its job is
+    to guarantee that the presentation rule of CNT-RET-20 has something to
+    present, so that a disagreement is never silently resolved by ranking.
+
+    Two properties matter and are easy to get wrong:
+      * a document is never in conflict with itself — a policy stating the same
+        figure in prose and again in a table is agreement, not disagreement;
+      * a conflict across authority tiers is still reported, with the tiers
+        named, so a reader can see that the authoritative source says one thing
+        and a supporting one says another.
+    """
+    claims: list[tuple[Citation, str, str, frozenset[str]]] = []
+
+    for citation in citations:
+        text = citation.span
+        tokens = _significant(text)
+        for match in _CLAIM.finditer(text):
+            value, unit = match.group(1), match.group(2).lower()
+            if unit in _CLAIM_STOP or len(value) == 4 and value.startswith("20"):
+                continue
+            window = _significant(
+                text[max(0, match.start() - 120) : match.end() + 120]
+            ) or tokens
+            claims.append((citation, value, unit, window))
+
+    conflicts: list[Conflict] = []
+    seen: set[tuple[str, str]] = set()
+
+    for i, (cite_a, value_a, unit_a, terms_a) in enumerate(claims):
+        for cite_b, value_b, unit_b, terms_b in claims[i + 1 :]:
+            if cite_a.doc_id == cite_b.doc_id:
+                continue
+            if unit_a != unit_b or value_a == value_b:
+                continue
+            shared = terms_a & terms_b
+            if len(shared) < 2:
+                continue
+            key = tuple(sorted((cite_a.doc_id, cite_b.doc_id))) + (unit_a,)
+            if key[:2] in seen:
+                continue
+            seen.add(key[:2])
+            subject = " ".join(sorted(shared)[:4]) + f" ({unit_a})"
+            conflicts.append(Conflict(subject=subject, citations=(cite_a, cite_b)))
+
+    return conflicts
+
+
+def _significant(text: str) -> frozenset[str]:
+    import re
+
+    return frozenset(
+        t for t in re.findall(r"[a-z]{4,}", text.lower()) if t not in _CLAIM_STOP
+    )
+
+
+def _reciprocal_rank_fusion(
+    channel_results: dict[str, list[str]], k: int = 60
+) -> list[tuple[str, float, dict[str, int]]]:
+    """RRF (CNT-RET-04).
+
+    Rank-based on purpose: PGP scores are cosine similarities from a model we
+    do not control, ECM scores are BM25-family relevance on a different scale.
+    Merging them numerically produces an ordering that looks principled and is
+    arbitrary.
+    """
+    scores: dict[str, float] = {}
+    ranks: dict[str, dict[str, int]] = {}
+    for channel, doc_ids in channel_results.items():
+        for position, doc_id in enumerate(doc_ids, start=1):
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + position)
+            ranks.setdefault(doc_id, {})[channel] = position
+    ordered = sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
+    return [(doc_id, score, ranks[doc_id]) for doc_id, score in ordered]
+
+
+def scope_population(index, connector: Connector, principal: str = "service") -> list[DocMetadata]:
+    """Every document the connector *could* see, mapped to canonical metadata.
+
+    Powers the scope preview, the add/remove diff and the corpus browser — all
+    of which read the one effective-corpus definition (CNT-SCP-15). When 'how
+    many documents are in this connector' has two implementations, one of them
+    is wrong, and it is always the one shown to the customer.
+    """
+    population: list[DocMetadata] = []
+    cursor: str | None = None
+    while True:
+        page = index.list_documents(connector.kb_id, cursor=cursor)
+        for hit in page.hits:
+            outcome = apply_map(connector.field_map, hit.metadata, connector.kb_id)
+            if outcome.metadata is not None:
+                population.append(outcome.metadata)
+        cursor = page.cursor
+        if not cursor:
+            break
+    return population

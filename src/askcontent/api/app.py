@@ -1,0 +1,403 @@
+"""HTTP surface.
+
+Mirrors the askdb console's shape: connection-scoped screens under a connector,
+a discovery surface above them, and a chat surface that returns evidence rather
+than prose.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from ..adapters.parsers.registry import capabilities
+from ..bootstrap import Platform, build
+from ..domain.catalog import classify, staleness
+from ..domain.documents import Sensitivity
+from ..domain.retrieval_spec import Intent, ModelRetrievalRequest, RetrievalSpec
+from ..domain.scope import KnowledgeScope, diff, evaluate
+from ..services.mapping import suggest_map, validate_map
+from ..services.probe import probe
+from ..services.registry import ConnectorState
+from ..services.retrieval import NOW, scope_population
+
+platform: Platform = build(simulate_latency=False)
+
+app = FastAPI(title="askcontent", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------------- discovery
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "parser_capabilities": capabilities(),
+        "reranker": {
+            "id": getattr(platform.reranker, "reranker_id", "unknown"),
+            "version": getattr(platform.reranker, "reranker_version", "unknown"),
+            "floor": getattr(platform.reranker, "score_floor", None),
+        },
+        "embedder": {
+            "model": platform.embedder.model_id,
+            "dimension": platform.embedder.dimension,
+        },
+        "sources": {"index": "MockPgpIndex", "repository": "MockEcmRepository"},
+    }
+
+
+@app.get("/api/knowledgebases")
+def list_knowledgebases() -> list[dict]:
+    """Discovery: everything visible in PGP, with registration state
+    (CNT-ADM-03, CNT-ADM-04)."""
+    registered = {c.kb_id: c for c in platform.registry.list()}
+    out = []
+    for kb in platform.index.list_knowledgebases():
+        connector = registered.get(kb.kb_id)
+        out.append({
+            **kb.model_dump(mode="json"),
+            "state": str(connector.state) if connector else "unregistered",
+            "connector_id": connector.connector_id if connector else None,
+        })
+    return out
+
+
+@app.get("/api/knowledgebases/{kb_id}")
+def describe_knowledgebase(kb_id: str) -> dict:
+    try:
+        return platform.index.describe(kb_id).model_dump(mode="json")
+    except KeyError:
+        raise HTTPException(404, f"unknown knowledgebase {kb_id}") from None
+
+
+@app.post("/api/knowledgebases/{kb_id}/suggest-map")
+def suggest_field_map(kb_id: str) -> dict:
+    """A starting point for the mapping editor, never an applied default."""
+    descriptor = platform.index.describe(kb_id)
+    return suggest_map(kb_id, [f.name for f in descriptor.fields]).model_dump(mode="json")
+
+
+class ValidateMapRequest(BaseModel):
+    field_map: dict
+
+
+@app.post("/api/knowledgebases/{kb_id}/validate-map")
+def validate_field_map(kb_id: str, body: ValidateMapRequest) -> dict:
+    from ..services.mapping import FieldMap
+
+    sample = [hit.metadata for hit in platform.index.list_documents(kb_id).hits]
+    validation = validate_map(FieldMap.model_validate(body.field_map), sample)
+    return validation.model_dump(mode="json") | {"can_activate": validation.can_activate}
+
+
+# ---------------------------------------------------------------- connectors
+
+
+@app.get("/api/connectors")
+def list_connectors() -> list[dict]:
+    out = []
+    for connector in platform.registry.list():
+        population = scope_population(platform.index, connector)
+        in_scope = sum(1 for m in population if evaluate(connector.scope, m).in_scope)
+        out.append({
+            "connector_id": connector.connector_id,
+            "name": connector.name,
+            "business_group": connector.business_group,
+            "kb_id": connector.kb_id,
+            "state": str(connector.state),
+            "version": connector.version,
+            "corpus_size": in_scope,
+            "visible_documents": len(population),
+            "sensitivity_ceiling": str(connector.scope.sensitivity_ceiling),
+        })
+    return out
+
+
+@app.get("/api/connectors/{connector_id}")
+def get_connector(connector_id: str) -> dict:
+    connector = _connector(connector_id)
+    return connector.model_dump(mode="json")
+
+
+@app.post("/api/connectors/{connector_id}/state")
+def set_state(connector_id: str, body: dict) -> dict:
+    """Suspension takes effect on the next query (CNT-ADM-05)."""
+    state = ConnectorState(body["state"])
+    connector = platform.registry.set_state(connector_id, state, body.get("actor", "admin"))
+    return {"connector_id": connector.connector_id, "state": str(connector.state)}
+
+
+# --------------------------------------------------------------------- scope
+
+
+class ScopePreviewRequest(BaseModel):
+    scope: dict
+
+
+@app.post("/api/connectors/{connector_id}/scope/preview")
+def preview_scope(connector_id: str, body: ScopePreviewRequest) -> dict:
+    """Preview and add/remove diff, before the scope can be saved
+    (CNT-SCP-07..09). 'Add three hundred, remove eleven thousand' is a sentence
+    that stops a mistake."""
+    connector = _connector(connector_id)
+    candidate = KnowledgeScope.model_validate(body.scope)
+    population = scope_population(platform.index, connector)
+
+    matched = [m for m in population if evaluate(candidate, m).in_scope]
+    ceiling_rejected = sum(
+        1 for m in population if m.sensitivity.rank > candidate.sensitivity_ceiling.rank
+    )
+    delta = diff(connector.scope, candidate, population)
+
+    by_root: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    by_age: dict[str, int] = {}
+    for meta in matched:
+        by_root[meta.space or "—"] = by_root.get(meta.space or "—", 0) + 1
+        key = str(meta.doc_type or "unclassified")
+        by_type[key] = by_type.get(key, 0) + 1
+        bucket = _age_bucket(meta.updated_at)
+        by_age[bucket] = by_age.get(bucket, 0) + 1
+
+    return {
+        "matched": len(matched),
+        "total_visible": len(population),
+        "total_bytes": sum(m.size_bytes or 0 for m in matched),
+        "rejected_by_ceiling": ceiling_rejected,
+        "by_root": by_root,
+        "by_type": by_type,
+        "by_age": by_age,
+        "diff": delta.model_dump(mode="json"),
+        "diff_summary": delta.summary(),
+    }
+
+
+@app.put("/api/connectors/{connector_id}/scope")
+def update_scope(connector_id: str, body: ScopePreviewRequest) -> dict:
+    connector = _connector(connector_id)
+    candidate = KnowledgeScope.model_validate(body.scope)
+    population = scope_population(platform.index, connector)
+    delta = diff(connector.scope, candidate, population)
+    updated = platform.registry.update_scope(
+        connector_id, candidate, "admin", delta.model_dump(mode="json")
+    )
+    return {
+        "connector_id": updated.connector_id,
+        "version": updated.version,
+        "diff": delta.model_dump(mode="json"),
+        # The asymmetry, stated in the words the console must show
+        # (CNT-SCP-12, CNT-SCR-04).
+        "effect": "Narrowing takes effect on the next query. Widening takes "
+                  "effect after the next ingest run.",
+    }
+
+
+# -------------------------------------------------------------------- corpus
+
+
+@app.get("/api/connectors/{connector_id}/corpus")
+def corpus(connector_id: str) -> dict:
+    """The effective corpus, with the single named rule that excluded each
+    document (CNT-SCP-16). 'Why isn't the platform answering from this page?'
+    must be a lookup, not an investigation."""
+    connector = _connector(connector_id)
+    population = scope_population(platform.index, connector)
+
+    documents = []
+    reasons: dict[str, int] = {}
+    for meta in population:
+        decision = evaluate(connector.scope, meta)
+        classification = classify(meta, None)
+        state = staleness(meta, connector.retrieval.freshness, NOW)
+        if not decision.in_scope:
+            key = str(decision.rule)
+            reasons[key] = reasons.get(key, 0) + 1
+        documents.append({
+            "doc_id": meta.doc_id,
+            "title": meta.title,
+            "url": meta.url,
+            "space": meta.space,
+            "path": meta.path,
+            "owner": meta.owner,
+            "labels": list(meta.labels),
+            "updated_at": meta.updated_at.isoformat() if meta.updated_at else None,
+            "sensitivity": str(meta.sensitivity),
+            "in_scope": decision.in_scope,
+            "exclusion_rule": str(decision.rule) if decision.rule else None,
+            "exclusion_detail": decision.detail,
+            "doc_type": str(classification.doc_type),
+            "doc_type_confidence": classification.confidence,
+            "doc_type_evidence": list(classification.evidence),
+            "doc_type_source": classification.source,
+            "staleness": str(state),
+        })
+
+    documents.sort(key=lambda d: (not d["in_scope"], d["title"]))
+    return {
+        "in_scope": sum(1 for d in documents if d["in_scope"]),
+        "excluded": sum(1 for d in documents if not d["in_scope"]),
+        "exclusion_reasons": reasons,
+        "documents": documents,
+    }
+
+
+# --------------------------------------------------------------------- probe
+
+
+@app.post("/api/connectors/{connector_id}/probe")
+def run_probe(connector_id: str, body: dict | None = None) -> dict:
+    connector = _connector(connector_id)
+    principal = (body or {}).get("principal", "service")
+    result = probe(platform.index, platform.repository, connector, principal)
+    return result.model_dump(mode="json") | {"passed": result.passed}
+
+
+# ------------------------------------------------------------------ retrieve
+
+
+class AskRequest(BaseModel):
+    connector_id: str
+    question: str
+    principal: str = "user:asha"
+    intent: Intent = Intent.LOOKUP
+
+
+@app.post("/api/ask")
+def ask(body: AskRequest) -> dict:
+    """Returns evidence, not prose.
+
+    Answer synthesis sits above this and may emit only sentences backed by one
+    of these citations (CNT-RET-18). Keeping the boundary here is what makes
+    'a claim with no supporting span is not emitted' enforceable rather than
+    aspirational.
+    """
+    connector = _connector(body.connector_id)
+
+    # What a model is permitted to emit. `channels` and `k_per_channel` are
+    # absent from this type by construction (CNT-RET-15).
+    model_request = ModelRetrievalRequest(intent=body.intent, question=body.question)
+
+    spec = RetrievalSpec(
+        intent=model_request.intent,
+        scope_ref=f"scope:{connector.connector_id}:v{connector.version}",
+        question=model_request.question,
+        terms=model_request.terms,
+        filters=model_request.filters,
+        doc_types=model_request.doc_types,
+        freshness=model_request.freshness,
+        authority=model_request.authority,
+        channels=connector.retrieval.channels,          # server-populated
+        k_per_channel=connector.retrieval.k_per_channel,  # server-populated
+    )
+
+    evidence = platform.retrieval.retrieve(connector, spec, body.principal)
+    return evidence.model_dump(mode="json")
+
+
+@app.post("/api/connectors/{connector_id}/diagnose")
+def diagnose(connector_id: str, body: dict) -> dict:
+    """Dry run with the full trace, executable as another principal
+    (CNT-ADM-09, CNT-ADM-12)."""
+    connector = _connector(connector_id)
+    spec = RetrievalSpec(
+        intent=Intent(body.get("intent", "lookup")),
+        scope_ref=f"scope:{connector.connector_id}:v{connector.version}",
+        question=body["question"],
+        channels=connector.retrieval.channels,
+        k_per_channel=connector.retrieval.k_per_channel,
+    )
+    evidence = platform.retrieval.retrieve(
+        connector, spec, body.get("principal", "user:asha")
+    )
+    return evidence.model_dump(mode="json")
+
+
+# -------------------------------------------------------------------- health
+
+
+@app.get("/api/connectors/{connector_id}/health")
+def connector_health(connector_id: str) -> dict:
+    """Metrics that surface decay, each naming a likely cause and next action
+    (CNT-ADM-13, CNT-ADM-14). A number an administrator cannot act on is
+    decoration."""
+    connector = _connector(connector_id)
+    population = scope_population(platform.index, connector)
+    in_scope = [m for m in population if evaluate(connector.scope, m).in_scope]
+
+    unknown_dates = sum(1 for m in in_scope if m.updated_at is None)
+    expired = sum(
+        1 for m in in_scope
+        if str(staleness(m, connector.retrieval.freshness, NOW)) in ("stale", "expired")
+    )
+
+    return {
+        "corpus_size": len(in_scope),
+        "metrics": [
+            {
+                "key": "passage_cache_hit_rate",
+                "value": round(platform.passages.stats.hit_rate, 3),
+                "cause": "Low after a parser or chunker version change, or when the "
+                         "ECM exposes no document version.",
+                "action": "If persistently low, ask the ECM owners for an etag — "
+                          "without one the fetch cannot be skipped.",
+            },
+            {
+                "key": "documents_without_parseable_date",
+                "value": unknown_dates,
+                "cause": "The updated_at field map is wrong, or the source omits it.",
+                "action": "Open the mapping editor and check the live samples for "
+                          "the date field. These documents are never treated as fresh.",
+            },
+            {
+                "key": "stale_or_expired_documents",
+                "value": expired,
+                "cause": "The corpus is ageing faster than its owners review it.",
+                "action": "Send the work list to the content owners; expired documents "
+                          "are excluded from retrieval by default.",
+            },
+            {
+                "key": "parser_capabilities",
+                "value": capabilities(),
+                "cause": "A missing extra means PDFs refuse rather than parse badly.",
+                "action": "Install the 'pdf' extra in the worker image.",
+            },
+        ],
+    }
+
+
+@app.get("/api/audit")
+def audit() -> list[dict]:
+    return [entry.model_dump(mode="json") for entry in reversed(platform.registry.audit)]
+
+
+# ------------------------------------------------------------------- helpers
+
+
+def _connector(connector_id: str):
+    try:
+        return platform.registry.get(connector_id)
+    except KeyError:
+        raise HTTPException(404, f"unknown connector {connector_id}") from None
+
+
+def _age_bucket(updated_at: dt.datetime | None) -> str:
+    if updated_at is None:
+        return "unknown"
+    days = (NOW - updated_at).days
+    if days < 90:
+        return "0–90 days"
+    if days < 365:
+        return "90–365 days"
+    if days < 1095:
+        return "1–3 years"
+    return "3+ years"
