@@ -161,3 +161,89 @@ top of both files. Ranking assertions in tests are therefore about *mechanism*
    across a 40-candidate fan-out will otherwise dominate the latency budget.
 5. Whether PGP exposes enumeration. If not, the scope preview and corpus browser
    become an ECM cost rather than an index one.
+
+---
+
+## 2026-08-22 · What the first run against a real database found
+
+Four defects, none of which the mock could surface. Recorded together because
+the pattern matters more than the individual bugs: **each one was invisible
+precisely because the mock was convenient.**
+
+### The HNSW cast was impossible, and the index still built
+
+Revision 0002 indexed `(vector::vector(2000))`, reasoning that HNSW caps width
+at 2000 dimensions. The column is `vector(1536)`, and pgvector rejects that
+cast: *expected 2000 dimensions, not 1536*.
+
+The index **built successfully**, because an empty table has no row to reject.
+The failure was queued up for the first insert, somewhere that would have
+looked unrelated.
+
+*Lesson: an index expression that has never been evaluated against a row has
+not been tested.* Fixed in 0003; the cast condition now lives in `vector_ops`,
+which both the migration and the query builder read.
+
+### Naive and aware datetimes
+
+The mock returned naive `datetime`s; Postgres returns `timestamptz`. Comparing
+them raises — at retrieval time, on whichever document came back first, which
+reads like a retrieval bug and is a timezone bug. `catalog.as_utc` now
+normalises, treating naive input as UTC, because every source we accept stores
+instants rather than local wall-clock times.
+
+### The keyword channel returned nothing for questions
+
+`plainto_tsquery` ANDs every term, so *"how many weeks of paid parental leave
+does a primary caregiver get"* required all eleven words in the title. The
+channel returned zero hits for every natural-language question and the mock hid
+it by counting substrings.
+
+Significant terms are now OR-ed and ordered by `ts_rank`, which keeps the
+property the channel exists for — a rare token or exact identifier still
+matches, and now scores *highest* because it is rare.
+
+### The index filtered by joining to the store
+
+The worst of the four. `PgPgpIndex.search` applied the scope predicate by
+joining `pgp_index_entry` to `ecm_document`. An entry whose document the store
+has dropped has no row to join to, so **every stale identifier was filtered out
+before the resolution gate could see it** — silently removing the only signal
+that a sync is broken. `stale_index_count` read 0 while three planted stale
+entries sat in the database.
+
+PGP filters on what PGP knows. The stub now carries its own `facets` column,
+the adapter reads only that, and there is no join. Stale entries survive
+filtering and are dropped at resolution, which is the designed behaviour and
+the reason `CNT-RET-08` re-checks against the ECM.
+
+*Lesson: an adapter that reaches into the other system's storage is not an
+adapter for a separate system.*
+
+### And one that was only ever a reporting bug
+
+`/api/health` named its adapters with string literals, so it reported
+`MockPgpIndex` while `PgPgpIndex` was serving. It now reports
+`type(...).__name__`. A health endpoint that names the adapter it *expects*
+will confidently tell you the mocks are running when they are not.
+
+---
+
+## 2026-08-22 · Measured, against the shared Supabase project
+
+All figures from the `people-ops` corpus, 128 documents, over a remote pooler.
+They are network-dominated and would look nothing like this on a local
+database — which is the point of measuring them here.
+
+| Change | Before | After |
+|---|---|---|
+| Per-document → batch resolution | 14.3 s | 8.6 s |
+| Cold vs. warm passage cache | 8.4 s | **0.40 s** |
+
+**The passage cache is worth 21x.** `CNT-RET-10` claims it is the single
+largest latency lever in the system; that is the measurement behind the claim.
+
+The residual 8.4 s on a cold cache is one body fetch per candidate document.
+That is the cost the cache exists to pay once, and it is also the argument for
+the batch-fetch endpoint listed as an open question — the same argument as for
+batch authorization, with the same shape.

@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from pydantic import BaseModel, Field
 
-from ..domain.catalog import assign_authority, staleness
+from ..domain.catalog import as_utc, assign_authority, staleness
 from ..domain.chunks import Chunk
 from ..domain.documents import (
     AuthorityTier,
@@ -35,7 +35,9 @@ from ..ports.content_repository import RepositoryUnavailable, ResolutionOutcome
 from .mapping import apply_map
 from .registry import Connector, ConnectorState
 
-NOW = dt.datetime(2026, 8, 22, 12, 0, 0)
+#: The corpus "now". Aware, because document timestamps arriving from
+#: Postgres are `timestamptz` and mixing the two raises at retrieval time.
+NOW = dt.datetime(2026, 8, 22, 12, 0, 0, tzinfo=dt.UTC)
 
 
 # --------------------------------------------------------------------------
@@ -198,9 +200,16 @@ class RetrievalService:
             )
 
         # ④ resolution -----------------------------------------------------
+        # One round trip for every candidate where the store supports it. The
+        # gates below are identical either way — batching changes the number of
+        # requests, never the decision.
+        batch = self._resolve_batch(connector, list(candidates), principal)
+
         resolved: list[tuple[DocMetadata, CandidateTrace]] = []
         for doc_id, candidate in candidates.items():
-            metadata = self._resolve(connector, doc_id, principal, candidate, trace)
+            metadata = self._resolve(
+                connector, doc_id, principal, candidate, trace, batch.get(doc_id)
+            )
             if metadata is not None:
                 resolved.append((metadata, candidate))
 
@@ -366,13 +375,28 @@ class RetrievalService:
 
     # -- ④ ------------------------------------------------------------------
 
+    def _resolve_batch(self, connector: Connector, doc_ids: list[str], principal: str):
+        """Pre-resolve every candidate in one call, when the store offers it."""
+        batch_fn = getattr(self.repository, "fetch_metadata_batch", None)
+        if batch_fn is None:
+            return {}
+        refs = [DocRef(doc_id=doc_id, kb_id=connector.kb_id) for doc_id in doc_ids]
+        try:
+            return batch_fn(refs, principal)
+        except Exception:  # noqa: BLE001
+            # A failed batch degrades to per-document resolution rather than
+            # failing the question. Slower is a worse answer than fast; no
+            # answer is worse than both.
+            return {}
+
     def _resolve(
         self, connector: Connector, doc_id: str, principal: str,
         candidate: CandidateTrace, trace: RetrievalTrace,
+        prefetched=None,
     ) -> DocMetadata | None:
         ref = DocRef(doc_id=doc_id, kb_id=connector.kb_id)
         try:
-            resolution = self.repository.fetch_metadata(ref, principal)
+            resolution = prefetched or self.repository.fetch_metadata(ref, principal)
         except RepositoryUnavailable as exc:
             candidate.resolution = "unavailable"
             candidate.dropped_by = "ecm_unavailable"
@@ -483,7 +507,7 @@ class RetrievalService:
 
         stale = [c for c in citations if c.staleness in (Staleness.STALE, Staleness.EXPIRED)]
         if stale:
-            oldest = min(stale, key=lambda c: c.updated_at or NOW)
+            oldest = min(stale, key=lambda c: as_utc(c.updated_at) if c.updated_at else NOW)
             notices.append(
                 f"Best supporting evidence includes '{oldest.title}', last updated "
                 f"{oldest.updated_at:%d %b %Y}" if oldest.updated_at else

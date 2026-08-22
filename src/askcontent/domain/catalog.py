@@ -122,6 +122,21 @@ class FreshnessPolicy(BaseModel):
     expired_days: int = 1095
 
 
+def as_utc(value: dt.datetime) -> dt.datetime:
+    """Normalise to an aware UTC datetime.
+
+    Metadata reaches us from two places with two conventions: Postgres returns
+    `timestamptz` as aware, and a fixture or an API returning a bare ISO string
+    is naive. Comparing the two raises, and it raises *at retrieval time* on
+    whichever document happens to come back first — which reads like a
+    retrieval bug and is a timezone bug.
+
+    Naive input is treated as UTC. That is the only defensible reading: every
+    source we accept stores instants, not local wall-clock times.
+    """
+    return value.replace(tzinfo=dt.UTC) if value.tzinfo is None else value.astimezone(dt.UTC)
+
+
 def staleness(
     meta: DocMetadata, policy: FreshnessPolicy, now: dt.datetime
 ) -> Staleness:
@@ -132,7 +147,7 @@ def staleness(
     """
     if meta.updated_at is None:
         return Staleness.UNKNOWN_AGE
-    age = (now - meta.updated_at).days
+    age = (as_utc(now) - as_utc(meta.updated_at)).days
     if age >= policy.expired_days:
         return Staleness.EXPIRED
     if age >= policy.stale_days:

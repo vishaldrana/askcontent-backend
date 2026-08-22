@@ -40,6 +40,25 @@ class ContentRepository(Protocol):
 
     def fetch_metadata(self, ref: DocRef, principal: str) -> Resolution: ...
 
+    def fetch_metadata_batch(
+        self, refs: list[DocRef], principal: str
+    ) -> dict[str, Resolution]:
+        """Resolve many identifiers at once.
+
+        Optional. Callers fall back to the single form, so an adapter for a
+        store with no batch endpoint still works — it is simply slower, and the
+        trace shows how much slower.
+
+        This is not an optimisation detail. Resolution runs on **every**
+        candidate of **every** question, so without it the round-trip count is
+        `2 x k` and the latency budget belongs to the network rather than to
+        anything we compute. Measured against the shared Supabase project, a
+        20-candidate question spent ~14s in per-document round trips and ~1s
+        with this method. If the real ECM has no batch form, that number is the
+        argument for asking for one.
+        """
+        ...
+
     def search(
         self, query: str, principal: str, k: int = 20, spaces: tuple[str, ...] = ()
     ) -> list[DocRef]:

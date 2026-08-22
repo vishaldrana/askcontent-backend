@@ -8,14 +8,15 @@ than prose.
 from __future__ import annotations
 
 import datetime as dt
+import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ..adapters.parsers.registry import capabilities
-from ..bootstrap import Platform, build
-from ..domain.catalog import classify, staleness
+from ..bootstrap import Platform, build, build_postgres
+from ..domain.catalog import as_utc, classify, staleness
 from ..domain.documents import Sensitivity
 from ..domain.retrieval_spec import Intent, ModelRetrievalRequest, RetrievalSpec
 from ..domain.scope import KnowledgeScope, diff, evaluate
@@ -24,7 +25,20 @@ from ..services.probe import probe
 from ..services.registry import ConnectorState
 from ..services.retrieval import NOW, scope_population
 
-platform: Platform = build(simulate_latency=False)
+def _platform() -> Platform:
+    """Postgres when configured, mocks otherwise.
+
+    One switch, in the composition root, and nothing above it changes — which is
+    the property the two-port split exists to give us (CNT-FED-05).
+    """
+    import os
+
+    if os.environ.get("ASKCONTENT_DATABASE_URL"):
+        return build_postgres()
+    return build(simulate_latency=False)
+
+
+platform: Platform = _platform()
 
 app = FastAPI(title="askcontent", version="0.1.0")
 app.add_middleware(
@@ -52,8 +66,26 @@ def health() -> dict:
             "model": platform.embedder.model_id,
             "dimension": platform.embedder.dimension,
         },
-        "sources": {"index": "MockPgpIndex", "repository": "MockEcmRepository"},
+        # Reported from the live objects, never as a literal. A health endpoint
+        # that names the adapter it *expects* rather than the one that is wired
+        # will confidently tell you the mocks are running when they are not.
+        "sources": {
+            "index": type(platform.index).__name__,
+            "repository": type(platform.repository).__name__,
+        },
+        "database": _database_health(),
     }
+
+
+def _database_health() -> dict:
+    if not os.environ.get("ASKCONTENT_DATABASE_URL"):
+        return {"configured": False}
+    try:
+        from ..db.session import healthcheck
+
+        return {"configured": True, **healthcheck()}
+    except Exception as exc:  # noqa: BLE001
+        return {"configured": True, "error": str(exc)}
 
 
 @app.get("/api/knowledgebases")
@@ -393,7 +425,7 @@ def _connector(connector_id: str):
 def _age_bucket(updated_at: dt.datetime | None) -> str:
     if updated_at is None:
         return "unknown"
-    days = (NOW - updated_at).days
+    days = (NOW - as_utc(updated_at)).days
     if days < 90:
         return "0–90 days"
     if days < 365:

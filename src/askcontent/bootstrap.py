@@ -58,10 +58,55 @@ def build_reranker():
     return LexicalReranker()
 
 
+def build_postgres(org_slug: str = "demo") -> "Platform":
+    """The real thing: Postgres-backed index, repository and registry.
+
+    Same ports, same services, same pipeline. The only difference from `build()`
+    is which adapters are constructed — which is the property the port split
+    exists to give us, and it is worth checking that it actually held.
+    """
+    from .adapters.index.pg_pgp import PgPgpIndex
+    from .adapters.repository.pg_ecm import PgEcmRepository
+    from .db.session import get_engine, get_session_factory
+    from .services.pg_registry import PgRegistry
+
+    engine = get_engine()
+    sessions = get_session_factory()
+
+    embedder = HashingEmbedder()
+    index = PgPgpIndex(engine, embedder)
+    repository = PgEcmRepository(engine)
+    reranker = build_reranker()
+    passages = PassageService(repository, embedder, sandbox=False)
+    retrieval = RetrievalService(index, repository, embedder, reranker, passages)
+
+    org_id = _ensure_org(sessions, org_slug)
+    registry = PgRegistry(sessions, org_id)
+
+    return Platform(
+        index=index, repository=repository, embedder=embedder, reranker=reranker,
+        passages=passages, retrieval=retrieval, registry=registry,
+    )
+
+
+def _ensure_org(sessions, slug: str):
+    from sqlalchemy import select
+
+    from .db import models as m
+
+    with sessions() as session:
+        org = session.scalars(select(m.Org).where(m.Org.slug == slug)).one_or_none()
+        if org is None:
+            org = m.Org(slug=slug, name=slug.title())
+            session.add(org)
+            session.commit()
+        return org.id
+
+
 @dataclass
 class Platform:
-    index: MockPgpIndex
-    repository: MockEcmRepository
+    index: object
+    repository: object
     embedder: HashingEmbedder
     reranker: object
     passages: PassageService
