@@ -134,19 +134,72 @@ query expression differs, the database **silently falls back to a sequential
 scan**. It is not an error; it is a hundredfold latency regression that presents
 as "search feels slow".
 
-### Provisioning
+### Where it runs
+
+The **shared Supabase project** that already hosts askdb
+(`qeiayokzacpmxvthrpdp`, us-east-2). askdb owns the `askdb` schema; we own
+`askcontent`. Neither touches `public`, and `askdb`'s 36 tables are untouched.
 
 ```bash
-export SUPABASE_ACCESS_TOKEN=sbp_...     # supabase.com/dashboard/account/tokens
-export SUPABASE_DB_PASSWORD='...'
-export SUPABASE_ORG_ID=...               # npx supabase orgs list
-./scripts/provision_supabase.sh
+cp .env.example .env      # then fill in, or copy the DSN from askdb-backend/.env
+set -a && . ./.env && set +a
+PYTHONPATH=src .venv/bin/python -m alembic upgrade head
 ```
 
-Creates the project, migrates through the direct connection, creates the
-non-owning role, loads a sample dataset, and then **verifies**: extension
-present, revision at head, 24 policies, and no table with RLS enabled but no
-policy.
+Current state: **revision 0002**, 27 tables, 24 policies, HNSW + two GIN
+indexes, and the `people-ops` corpus loaded into `ecm_stub` (125 documents in
+the store, 128 in the index — the 3 unresolvable ones are a planted effect).
+
+### Four things this deployment taught us the hard way
+
+**The direct host does not resolve.** `db.<ref>.supabase.co` is IPv6-only.
+Both URLs point at the **pooler**, and the region prefix is `aws-1`, not
+`aws-0` — `aws-0-us-east-2` resolves in DNS but answers
+`tenant/user not found`, which reads like a credential problem and is not.
+
+| Port | Mode | Use |
+|---|---|---|
+| 5432 | session | migrations, `CREATE EXTENSION`, DDL |
+| 6543 | transaction | the application, if you want it |
+
+**`options` on the DSN is silently dropped.** Supavisor discards the startup
+parameter, so `?options=-csearch_path=...` yields a working connection whose
+search_path is the server default — and 27 tables land in `public` on a shared
+database. `src/askcontent/db/schema.py` issues `SET search_path` from a connect
+listener instead, which a session-mode pooler cannot drop. `statement_timeout`
+is set there for the same reason.
+
+**pgvector lives in `extensions`, not `public`.** That schema must be on the
+search_path or an unqualified `VECTOR(...)` in the DDL fails to resolve.
+
+**The version table is prefixed.** `alembic_version` is the default name for
+*every* project using Alembic, so on a shared database it is the one table
+guaranteed to collide — silently and catastrophically, with two services
+reading each other's revision pointer. Ours is
+`askcontent.askcontent_alembic_version`; askdb's is `askdb.askdb_alembic_version`.
+
+### The control plane is a separate tree
+
+`migrations_control/` with its own `alembic_control.ini` and its own history:
+
+```bash
+alembic -c alembic_control.ini upgrade head    # only when multi-tenant
+```
+
+Not tidiness. A single tree means one `alembic upgrade head` applies
+control-plane tables to every tenant database it touches, and the separation in
+`PLT-TEN-01/02` exists precisely so that cannot happen. This deployment is
+single-tenant (`PLT-TEN-03`), so it is never run.
+
+### Known gap
+
+`ARC-TEC-04` wants the application to connect as a **non-owning role without
+`BYPASSRLS`**. On Supabase's pooler, tenant routing is keyed on
+`postgres.<project-ref>`, so a custom role needs pooler support that is not
+configured here — the application currently connects as `postgres`, which owns
+the tables. The policies are created and correct, but they are **not being
+exercised** by this connection. Fix before any second tenant exists; it is a
+deployment change, not a code change.
 
 ---
 

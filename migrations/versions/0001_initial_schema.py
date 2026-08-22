@@ -37,10 +37,19 @@ def _run(name: str) -> None:
 
 def upgrade() -> None:
     # pgvector must exist before any table declaring a VECTOR column.
-    # On Supabase this succeeds through the direct connection (5432) and fails
-    # through the transaction pooler (6543) — see migrations/env.py.
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    #
+    # On Supabase, extensions are installed into a dedicated `extensions`
+    # schema rather than `public`, and both of these are typically already
+    # present on a shared project. `IF NOT EXISTS` therefore does the right
+    # thing in both cases: it installs them on a bare Postgres and is a no-op
+    # here. The `extensions` schema is on our search_path (db/schema.py), which
+    # is what makes an unqualified `VECTOR(...)` in the DDL below resolve.
+    #
+    # Extension DDL needs a SESSION-mode connection. Supabase's transaction
+    # pooler (port 6543) is not one; the session pooler (5432) is.
+    op.execute("CREATE SCHEMA IF NOT EXISTS extensions")
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions")
 
     op.execute(f'CREATE SCHEMA IF NOT EXISTS "{settings.db_schema}"')
 

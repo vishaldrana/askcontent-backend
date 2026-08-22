@@ -34,9 +34,20 @@ if ! $SUPABASE projects list >/dev/null 2>&1; then
    https://supabase.com/dashboard/account/tokens"
 fi
 
-# The database password is generated if not supplied, and printed once at the
-# end. A password chosen under time pressure is a password that ends up in a
-# shell history.
+# A password file keeps the secret out of shell history and out of any
+# transcript. Checked before generation, because an *existing* project already
+# has a password and generating a new one here would simply fail to connect.
+PW_FILE="${SUPABASE_DB_PASSWORD_FILE:-$HOME/.askcontent-db-pw}"
+if [[ -z "${SUPABASE_DB_PASSWORD:-}" && -f "$PW_FILE" ]]; then
+  SUPABASE_DB_PASSWORD="$(tr -d '\r\n' < "$PW_FILE")"
+  echo "==> read database password from $PW_FILE"
+fi
+
+if [[ -n "${SUPABASE_PROJECT_REF:-}" && -z "${SUPABASE_DB_PASSWORD:-}" ]]; then
+  die "SUPABASE_PROJECT_REF names an existing project, so its password cannot be
+   generated. Put it in $PW_FILE (chmod 600) or set SUPABASE_DB_PASSWORD."
+fi
+
 if [[ -z "${SUPABASE_DB_PASSWORD:-}" ]]; then
   SUPABASE_DB_PASSWORD="$(python3 -c "import secrets,string;a=string.ascii_letters+string.digits;print(''.join(secrets.choice(a) for _ in range(32)))")"
   GENERATED_PASSWORD=1
@@ -81,7 +92,16 @@ ENC_PW="$(python3 -c "import urllib.parse,os;print(urllib.parse.quote(os.environ
 # mode: DDL, advisory locks and CREATE EXTENSION do not survive it, so
 # migrations must never run through 6543.
 export ASKCONTENT_MIGRATION_DATABASE_URL="postgresql+psycopg://postgres:${ENC_PW}@${HOST}:5432/postgres"
-export ASKCONTENT_DATABASE_URL="postgresql+psycopg://postgres.${SUPABASE_PROJECT_REF}:${ENC_PW}@aws-0-${REGION}.pooler.supabase.com:6543/postgres"
+POOLER_HOST=""
+for prefix in aws-0 aws-1 aws-2; do
+  if host "${prefix}-${REGION}.pooler.supabase.com" >/dev/null 2>&1; then
+    POOLER_HOST="${prefix}-${REGION}.pooler.supabase.com"
+    break
+  fi
+done
+[[ -n "$POOLER_HOST" ]] || die "could not resolve a pooler host for region $REGION"
+echo "==> pooler host: $POOLER_HOST"
+export ASKCONTENT_DATABASE_URL="postgresql+psycopg://postgres.${SUPABASE_PROJECT_REF}:${ENC_PW}@${POOLER_HOST}:6543/postgres"
 PSQL_DSN="postgresql://postgres:${ENC_PW}@${HOST}:5432/postgres"
 
 # -- 2. migrations ------------------------------------------------------------

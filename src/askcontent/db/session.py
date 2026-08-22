@@ -14,21 +14,40 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import settings
+from .schema import pin_schema
 
-_engine = create_engine(
-    settings.database_url,
-    pool_size=settings.pool_size,
-    max_overflow=settings.pool_max_overflow,
-    pool_pre_ping=True,
-    connect_args={
-        # A statement that runs away must be killed by the database, not by a
-        # request timeout that leaves the query running.
-        "options": f"-c statement_timeout={settings.statement_timeout_ms}",
-    },
-    future=True,
-)
+# Built lazily. Creating it at import time would mean every module in the
+# application transitively required a working Postgres driver and a parseable
+# DATABASE_URL just to be imported, which breaks unit tests and CLI tools.
+_engine = None
+_factory = None
 
-SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
+
+def get_engine():
+    """The platform engine.
+
+    Note what is *absent*: a `connect_args={"options": ...}`. The pooler drops
+    the `options` startup parameter silently, so search_path and
+    statement_timeout are set by a connect listener instead — see db/schema.py.
+    """
+    global _engine
+    if _engine is None:
+        _engine = create_engine(
+            settings.database_url,
+            pool_size=settings.pool_size,
+            max_overflow=settings.pool_max_overflow,
+            pool_pre_ping=True,
+            future=True,
+        )
+        pin_schema(_engine)
+    return _engine
+
+
+def get_session_factory():
+    global _factory
+    if _factory is None:
+        _factory = sessionmaker(bind=get_engine(), expire_on_commit=False, future=True)
+    return _factory
 
 
 @contextlib.contextmanager
@@ -45,7 +64,7 @@ def tenant_session(org_id: uuid.UUID | str) -> Iterator[Session]:
     defect in tenant resolution *and* a failure of the row-level security
     policy created in revision 0001.
     """
-    session = SessionFactory()
+    session = get_session_factory()()
     try:
         session.execute(
             text("SELECT set_config('askcontent.org_id', :org, true)"),
@@ -68,7 +87,7 @@ def unscoped_session() -> Iterator[Session]:
     `app_user`. Everything else is protected by a policy that will return zero
     rows, which is the intended outcome rather than an inconvenience.
     """
-    session = SessionFactory()
+    session = get_session_factory()()
     try:
         yield session
         session.commit()
@@ -80,13 +99,15 @@ def unscoped_session() -> Iterator[Session]:
 
 
 def healthcheck() -> dict[str, object]:
-    with _engine.connect() as connection:
+    with get_engine().connect() as connection:
         version = connection.execute(text("SELECT version()")).scalar_one()
         has_vector = connection.execute(
             text("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")
         ).scalar_one()
         revision = connection.execute(
-            text(f'SELECT version_num FROM "{settings.db_schema}".alembic_version')
+            text(
+                f'SELECT version_num FROM "{settings.db_schema}".askcontent_alembic_version'
+            )
         ).scalar()
     return {
         "server": version.split(" on ")[0],

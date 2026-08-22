@@ -17,10 +17,12 @@ class Settings(BaseSettings):
     )
 
     # -- database ---------------------------------------------------------
-    # Supabase exposes two ports. 5432 is a direct connection; 6543 is
-    # pgbouncer in *transaction* mode. Migrations MUST use the direct URL —
-    # DDL, advisory locks and `CREATE EXTENSION` do not survive a transaction
-    # pooler — while the application uses the pooled one.
+    # Supabase's direct host (`db.<ref>.supabase.co`) is IPv6-only and does not
+    # resolve from an IPv4 network, so both URLs point at the pooler:
+    #   port 5432 = SESSION mode  — DDL, CREATE EXTENSION, migrations
+    #   port 6543 = TRANSACTION mode — the application, if you want it
+    # Session mode is used for both here because the pooler on this project is
+    # shared and the connection count is small.
     database_url: str = "postgresql+psycopg://localhost:5432/askcontent"
     migration_database_url: str | None = None
 
@@ -33,8 +35,11 @@ class Settings(BaseSettings):
     # fail, and which ones is a matter of pool timing.
     db_schema: str = "askcontent"
 
-    pool_size: int = 5
-    pool_max_overflow: int = 5
+    # The pooler is shared with askdb and other services on this project.
+    # Pool arithmetic is the operational risk: N services on one pooler means
+    # N pools, and the ceiling belongs to whoever hits it last.
+    pool_size: int = 3
+    pool_max_overflow: int = 2
     statement_timeout_ms: int = 15_000
 
     # -- multi-tenancy ----------------------------------------------------
