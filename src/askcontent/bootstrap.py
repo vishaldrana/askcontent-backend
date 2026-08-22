@@ -137,10 +137,11 @@ def build(*, simulate_latency: bool = True, failure_rate: float = 0.0) -> Platfo
 
 
 def _seed_connectors(platform: Platform) -> None:
-    """Three connectors over the same PGP instance, owned by three business
-    groups, with three different scopes (CNT-CON-02, CNT-CON-06).
+    """Five connectors over one index, owned by five business groups.
 
-    Note that none of them shares a field map: that is the point.
+    None of them shares a field map, and that is the point: the same concept is
+    spelled differently in every knowledgebase, and the platform never learns
+    those names.
     """
     reranker_id = getattr(platform.reranker, "reranker_id", "lexical-deterministic")
     floor = getattr(platform.reranker, "score_floor", 0.08)
@@ -148,134 +149,116 @@ def _seed_connectors(platform: Platform) -> None:
     def config(**overrides) -> RetrievalConfig:
         return RetrievalConfig(reranker_id=reranker_id, rerank_floor=floor, **overrides)
 
-    # -- People Operations ------------------------------------------------
-    hr_map = suggest_map("kb-hr-policies", [
-        f.name for f in platform.index.describe("kb-hr-policies").fields
-    ])
-    hr_map = hr_map.model_copy(update={
-        "rules": tuple(
-            r.model_copy(update={"value_map": _SENSITIVITY_MAP})
-            if r.target == "sensitivity" else r
-            for r in hr_map.rules
-        )
-    })
-    platform.registry.put(
-        Connector(
-            connector_id="cn-people-ops",
-            name="People Operations — HR policy library",
-            business_group="People Operations",
-            kb_id="kb-hr-policies",
-            field_map=hr_map,
-            scope=KnowledgeScope(
-                roots=(SourceRoot(kind="space", value="HR"),),
-                exclude=("/hr/archive/*",),
-                sensitivity_ceiling=Sensitivity.CONFIDENTIAL,
-            ),
-            access=AccessBinding(groups=("group:all-staff",)),
-            retrieval=config(),
-            authority_rules=(
+    def field_map(kb_id: str, **coercions):
+        descriptor = platform.index.describe(kb_id)
+        mapped = suggest_map(kb_id, [f.name for f in descriptor.fields])
+        rules = []
+        for rule in mapped.rules:
+            if rule.target in coercions:
+                rule = rule.model_copy(update={"coercion": coercions[rule.target]})
+            if rule.target == "sensitivity":
+                rule = rule.model_copy(update={"value_map": _SENSITIVITY_MAP})
+            rules.append(rule)
+        return mapped.model_copy(update={"rules": tuple(rules)})
+
+    seeds = [
+        dict(
+            connector_id="cn-consumer-banking",
+            name="Consumer Banking — deposit policy and disclosures",
+            business_group="Consumer Banking",
+            kb_id="kb-consumer-policy", space="CONSUMER",
+            exclude=("/consumer/archive/*",),
+            groups=("group:all-staff",),
+            ceiling=Sensitivity.CONFIDENTIAL,
+            authority=(
                 AuthorityRule(label="approved", tier=AuthorityTier.AUTHORITATIVE),
-                AuthorityRule(path_prefix="/hr/archive", tier=AuthorityTier.ARCHIVE),
+                AuthorityRule(path_prefix="/consumer/archive", tier=AuthorityTier.ARCHIVE),
             ),
             state=ConnectorState.ACTIVE,
         ),
-        actor="seed",
-    )
-
-    # -- Platform engineering ---------------------------------------------
-    eng_map = suggest_map("kb-eng-runbooks", [
-        f.name for f in platform.index.describe("kb-eng-runbooks").fields
-    ])
-    eng_map = eng_map.model_copy(update={
-        "rules": tuple(
-            r.model_copy(update={"coercion": Coercion.DATE_EPOCH})
-            if r.target == "updated_at" else
-            r.model_copy(update={"coercion": Coercion.STRING_LIST})
-            if r.target == "labels" else r
-            for r in eng_map.rules
-        )
-    })
-    platform.registry.put(
-        Connector(
-            connector_id="cn-platform-eng",
-            name="Platform Engineering — runbooks and decisions",
-            business_group="Platform Engineering",
-            kb_id="kb-eng-runbooks",
-            field_map=eng_map,
-            scope=KnowledgeScope(
-                roots=(SourceRoot(kind="space", value="ENG"),),
-                exclude=("/eng/archive/*",),
-                sensitivity_ceiling=Sensitivity.INTERNAL,
-            ),
-            access=AccessBinding(groups=("group:engineering",)),
-            retrieval=config(),
-            authority_rules=(
+        dict(
+            connector_id="cn-payments-ops",
+            name="Payments Operations — runbooks and decisions",
+            business_group="Payments Operations",
+            kb_id="kb-ops-runbooks", space="OPS",
+            exclude=("/ops/archive/*",),
+            groups=("group:payments-ops",),
+            ceiling=Sensitivity.INTERNAL,
+            authority=(
                 AuthorityRule(label="runbook", tier=AuthorityTier.AUTHORITATIVE),
                 AuthorityRule(label="adr", tier=AuthorityTier.AUTHORITATIVE),
             ),
             state=ConnectorState.ACTIVE,
         ),
-        actor="seed",
-    )
-
-    # -- Finance ----------------------------------------------------------
-    fin_map = suggest_map("kb-fin-controls", [
-        f.name for f in platform.index.describe("kb-fin-controls").fields
-    ])
-    fin_map = fin_map.model_copy(update={
-        "rules": tuple(
-            r.model_copy(update={"coercion": Coercion.DATE_DMY})
-            if r.target == "updated_at" else
-            r.model_copy(update={"value_map": _SENSITIVITY_MAP})
-            if r.target == "sensitivity" else r
-            for r in fin_map.rules
-        )
-    })
-    platform.registry.put(
-        Connector(
-            connector_id="cn-finance",
-            name="Finance — controls and customer policy",
-            business_group="Finance",
-            kb_id="kb-fin-controls",
-            field_map=fin_map,
-            scope=KnowledgeScope(
-                roots=(SourceRoot(kind="space", value="FIN"),),
-                sensitivity_ceiling=Sensitivity.CONFIDENTIAL,
-            ),
-            access=AccessBinding(groups=("group:finance",)),
-            retrieval=config(),
-            authority_rules=(
+        dict(
+            connector_id="cn-risk-compliance",
+            name="Risk and Compliance — controls and customer policy",
+            business_group="Risk and Compliance",
+            kb_id="kb-risk-controls", space="RISK",
+            exclude=(),
+            groups=("group:financial-crimes", "group:audit"),
+            ceiling=Sensitivity.CONFIDENTIAL,
+            authority=(
                 AuthorityRule(label="approved", tier=AuthorityTier.AUTHORITATIVE),
                 AuthorityRule(label="sox", tier=AuthorityTier.AUTHORITATIVE),
             ),
             state=ConnectorState.ACTIVE,
         ),
-        actor="seed",
-    )
-
-    # -- Public web: no ACL fields at all ---------------------------------
-    # Registered as a draft on purpose: it cannot be activated until an access
-    # class is declared (CNT-ACL-03).
-    web_map = suggest_map("kb-marketing-web", [
-        f.name for f in platform.index.describe("kb-marketing-web").fields
-    ])
-    platform.registry.put(
-        Connector(
-            connector_id="cn-public-web",
-            name="Public Web — trust and legal pages",
-            business_group="Marketing",
-            kb_id="kb-marketing-web",
-            field_map=web_map,
-            scope=KnowledgeScope(
-                roots=(SourceRoot(kind="space", value="WEB"),),
-                sensitivity_ceiling=Sensitivity.PUBLIC,
+        dict(
+            # The demonstration connector: two document classes on one subject,
+            # a planted disagreement between them, and a scanned specimen that
+            # must be refused rather than half-read.
+            connector_id="cn-legal-poa",
+            name="Power of Attorney — state guidelines and internal procedure",
+            business_group="Fiduciary Services",
+            kb_id="kb-poa", space="POA",
+            exclude=(),
+            groups=("group:all-staff",),
+            ceiling=Sensitivity.INTERNAL,
+            authority=(
+                AuthorityRule(label="state-guideline", tier=AuthorityTier.AUTHORITATIVE),
+                AuthorityRule(label="internal-procedure", tier=AuthorityTier.AUTHORITATIVE),
             ),
-            access=AccessBinding(groups=("group:all-staff",)),
-            retrieval=config(),
+            state=ConnectorState.ACTIVE,
+        ),
+        dict(
+            connector_id="cn-public-web",
+            name="Public Web — customer-facing help pages",
+            business_group="Digital Content",
+            kb_id="kb-public-web", space="WEB",
+            exclude=(),
+            groups=("group:all-staff",),
+            ceiling=Sensitivity.PUBLIC,
+            authority=(),
             state=ConnectorState.DRAFT,
         ),
-        actor="seed",
-    )
+    ]
+
+    coercion_by_kb = {
+        "kb-ops-runbooks": {"updated_at": Coercion.DATE_EPOCH, "labels": Coercion.STRING_LIST},
+        "kb-risk-controls": {"updated_at": Coercion.DATE_DMY},
+    }
+
+    for seed in seeds:
+        platform.registry.put(
+            Connector(
+                connector_id=seed["connector_id"],
+                name=seed["name"],
+                business_group=seed["business_group"],
+                kb_id=seed["kb_id"],
+                field_map=field_map(seed["kb_id"], **coercion_by_kb.get(seed["kb_id"], {})),
+                scope=KnowledgeScope(
+                    roots=(SourceRoot(kind="space", value=seed["space"]),),
+                    exclude=seed["exclude"],
+                    sensitivity_ceiling=seed["ceiling"],
+                ),
+                access=AccessBinding(groups=seed["groups"]),
+                retrieval=config(),
+                authority_rules=seed["authority"],
+                state=seed["state"],
+            ),
+            actor="seed",
+        )
 
 
 _SENSITIVITY_MAP = {

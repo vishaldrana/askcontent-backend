@@ -98,6 +98,9 @@ class Citation(BaseModel):
     updated_at: dt.datetime | None
     staleness: Staleness
     heading_path: tuple[str, ...]
+    #: Carried so conflict detection can tell a jurisdictional difference from
+    #: a contradiction.
+    labels: tuple[str, ...] = ()
     span: str
     rerank_score: float
     fusion_rank: int
@@ -497,6 +500,7 @@ class RetrievalService:
                     updated_at=metadata.updated_at,
                     staleness=state,
                     heading_path=chunk.heading_path,
+                    labels=metadata.labels,
                     span=chunk.text[:600],
                     rerank_score=round(float(result.score), 6),
                     fusion_rank=candidate.fusion_rank or 0,
@@ -537,6 +541,38 @@ _CLAIM_STOP = frozenset(
     "and following within least most more than about over under".split()
 )
 
+#: Units that are dates rather than measures. "15 April" and "1 March" are not
+#: competing claims about the same quantity, they are two effective dates.
+_DATE_UNITS = frozenset(
+    "january february march april may june july august september october "
+    "november december monday tuesday wednesday thursday friday saturday "
+    "sunday am pm".split()
+)
+
+#: Dimensions along which two documents are *allowed* to disagree because they
+#: are about different things. A per-state statutory summary saying 10 business
+#: days and another saying 4 is not a contradiction — it is federalism.
+#:
+#: This came straight out of the POA corpus: the first run flagged Texas
+#: against Florida, which is the kind of false positive that trains people to
+#: ignore the conflict banner. A banner nobody reads is worse than none.
+#:
+#: The rule is deliberately asymmetric. Two documents that *both* declare a
+#: scope and declare different ones are parallel. A document that declares
+#: none applies everywhere, so it can still contradict any of them — which is
+#: exactly the case that matters here: an internal procedure misstating the
+#: statutory window is wrong in every state, and suppressing that would hide
+#: the one finding worth having.
+_SCOPE_LABEL_PREFIXES = ("state-", "region-", "jurisdiction-", "entity-", "product-")
+
+
+def _scope_key(citation: Citation) -> frozenset[str]:
+    """The scope dimensions a citation declares, from its labels."""
+    return frozenset(
+        label for label in getattr(citation, "labels", ()) or ()
+        if label.startswith(_SCOPE_LABEL_PREFIXES)
+    )
+
 
 def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
     """Quantified claims that disagree across *different documents*.
@@ -565,7 +601,9 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
         tokens = _significant(text)
         for match in _CLAIM.finditer(text):
             value, unit = match.group(1), match.group(2).lower()
-            if unit in _CLAIM_STOP or len(value) == 4 and value.startswith("20"):
+            if unit in _CLAIM_STOP or unit in _DATE_UNITS:
+                continue
+            if len(value) == 4 and value.startswith("20"):
                 continue
             window = _significant(
                 text[max(0, match.start() - 120) : match.end() + 120]
@@ -580,6 +618,12 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
             if cite_a.doc_id == cite_b.doc_id:
                 continue
             if unit_a != unit_b or value_a == value_b:
+                continue
+            # Two documents scoped to different jurisdictions are parallel, not
+            # contradictory. Only compare where the scopes match, or where
+            # neither declares one.
+            scope_a, scope_b = _scope_key(cite_a), _scope_key(cite_b)
+            if scope_a and scope_b and scope_a != scope_b:
                 continue
             shared = terms_a & terms_b
             if len(shared) < 2:

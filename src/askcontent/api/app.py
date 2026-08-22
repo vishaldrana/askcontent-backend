@@ -52,6 +52,11 @@ app.add_middleware(
 # ---------------------------------------------------------------- discovery
 
 
+from .extra import router as extra_router  # noqa: E402
+
+app.include_router(extra_router)
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {

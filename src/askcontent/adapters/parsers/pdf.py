@@ -31,6 +31,23 @@ from ...domain.documents import (
     TableData,
 )
 
+_HEADING_NUMBERED = __import__("re").compile(r"^(\d+)(\.\d+)*\.?\s+\S")
+_HEADING_CAPS = __import__("re").compile(r"^[A-Z0-9][A-Z0-9 ,&/()\-]{3,60}$")
+_FOOTER = __import__("re").compile(r"page \d+ of \d+", __import__("re").I)
+
+
+def _heading_level(line: str) -> int | None:
+    """0 for not a heading, else its depth."""
+    if len(line) > 90:
+        return None
+    numbered = _HEADING_NUMBERED.match(line)
+    if numbered:
+        return 1 + line.split(" ", 1)[0].rstrip(".").count(".")
+    if _HEADING_CAPS.match(line) and not line.endswith("."):
+        return 1
+    return None
+
+
 # Below this many characters per page, the page is a scan rather than a
 # digital document, and the text layer (if any) is not worth having.
 TEXT_YIELD_FLOOR = 120.0
@@ -161,21 +178,79 @@ class PdfParser:
     # -- shared ------------------------------------------------------------
 
     def _blocks_from_pages(self, pages: list[str]) -> list[Block]:
+        """Recover paragraphs and headings from a flat text layer.
+
+        A text layer has no structure — pypdfium2 returns lines, not blocks, so
+        splitting on a blank line yields one paragraph per page and every chunk
+        loses its heading path. Since CNT-CHK-02 makes that path load-bearing,
+        headings are recovered heuristically here: a numbered clause
+        ("3.2 Durability"), an all-caps short line, or a short title-case line
+        followed by prose.
+
+        This is a **heuristic and is labelled as one**. Docling's layout model
+        replaces it and does the job properly with font size and position;
+        rung 1 exists for speed on clean digital PDFs, and this is the cost of
+        that speed. The parse path recorded on the document says which ran.
+        """
         blocks: list[Block] = []
+        heading_path: list[str] = []
         ordinal = 0
+
         for page_number, text in enumerate(pages, start=1):
-            for paragraph in (p.strip() for p in text.split("\n\n")):
-                if not paragraph:
-                    continue
+            buffer: list[str] = []
+
+            def flush() -> None:
+                nonlocal buffer, ordinal
+                if not buffer:
+                    return
                 blocks.append(
                     Block(
                         kind=BlockKind.PARAGRAPH,
-                        text=" ".join(paragraph.split()),
+                        text=" ".join(" ".join(buffer).split()),
+                        heading_path=tuple(heading_path),
                         page=page_number,
                         ordinal=ordinal,
                     )
                 )
                 ordinal += 1
+                buffer = []
+
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line:
+                    flush()
+                    continue
+                # The page footer carries no content and would otherwise land
+                # in the last chunk of every page.
+                if _FOOTER.search(line):
+                    continue
+
+                level = _heading_level(line)
+                if level:
+                    flush()
+                    heading_path = heading_path[: level - 1]
+                    heading_path.append(line)
+                    blocks.append(
+                        Block(
+                            kind=BlockKind.HEADING,
+                            text=line,
+                            heading_path=tuple(heading_path),
+                            level=level,
+                            page=page_number,
+                            ordinal=ordinal,
+                        )
+                    )
+                    ordinal += 1
+                    continue
+
+                buffer.append(line)
+                # A line ending a sentence and shorter than a full measure is a
+                # paragraph end; a full-width line is a wrap.
+                if line.endswith((".", ":", ";")) and len(line) < 72:
+                    flush()
+
+            flush()
+
         return blocks
 
     def _document(
