@@ -12,6 +12,7 @@ HTTP surface and the SSE event envelope — and nothing else.
 | **`askcontent-backend`** (this one) | API, worker, ports and adapters, evaluation harness, tests, design and engineering docs |
 | `askcontent-console` | The React administration console |
 | `askcontent-widget` | The embeddable widget and its React wrapper |
+| `askcontent-sample-data` | Seeded corpora, the stand-in source schema, loaders, planted effects |
 
 **Why the split.** Different deploy cadences, different reviewers, and the
 console must build in an environment with no Python toolchain at all
@@ -72,6 +73,80 @@ download.
 `GET /api/health` reports exactly which capabilities this deployment has. A
 capability gap must be visible as a gap, never discovered as a mysteriously
 empty corpus.
+
+---
+
+## The database
+
+SQLAlchemy models with Alembic on a linear revision history — the same shape as
+askdb, because an engineer who knows one should know the other.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m alembic upgrade head
+PYTHONPATH=src .venv/bin/python -m alembic upgrade head --sql   # review first
+```
+
+**27 tenant tables, 4 control-plane tables, 24 row-level security policies.**
+Table groups mirror `PLT-DM-*`; where a group differs it is because content
+differs from a schema, and the model's docstring says how.
+
+| Group | Tables |
+|---|---|
+| Identity and tenancy | `org`, `app_user`, `membership`, `workspace`, `auth_session` |
+| Sources | `knowledgebase`, `connector`, `field_rule` |
+| The catalog | `document`, `document_chunk`, `document_pin`, `authority_rule` |
+| Vectors | `embedding` |
+| Plans and terms | `retrieval_plan`, `glossary_term` |
+| Conversations | `thread`, `message` |
+| Audit | `retrieval_run`, `scope_change` |
+| RBAC | `rbac_role`, `rbac_role_member`, `rbac_label_rule`, `rbac_policy_version` |
+| Operations | `job`, `quarantine_item`, `embed`, `embed_session` |
+| Control plane *(separate database)* | `tenant`, `tenant_migration`, `global_user`, `user_tenant` |
+
+### Four things here are load-bearing
+
+**Revision 0001 creates the schema *and* the policies together** (`PLT-DM-18`).
+Splitting them leaves a window in which the tables exist and the policies do
+not, and that window is exactly when someone runs the first data load.
+
+**The DDL is generated from the ORM metadata**, by `tools/render_ddl.py` and
+`tools/render_rls.py`, into `migrations/sql/`. Regenerate and diff rather than
+hand-editing — a table added without a policy is the kind of omission that stays
+invisible until it is a breach.
+
+**The tenant setting is transaction-local.** `set_config('askcontent.org_id', …,
+true)`, never session-scoped. Behind a transaction-mode pooler a session-scoped
+setting belongs to whichever request last used that backend, which is a
+cross-tenant read — and it passes every test that uses a single connection.
+
+**The application role must not own the tables and must not hold `BYPASSRLS`**
+(`ARC-TEC-04`), or every policy above is silently inert. Creating that role is a
+deployment step, not a migration, because a migration cannot safely create roles
+on a managed platform. `scripts/provision_supabase.sh` does it.
+
+### The vector index trap
+
+`PLT-VEC-08` — the index and the query must use the **same distance expression
+and the same width cast**, produced by one shared helper
+(`src/askcontent/db/vector_ops.py`). The HNSW index type caps vector width below
+the widest embedding models, so the index is built on a narrowed cast. If the
+query expression differs, the database **silently falls back to a sequential
+scan**. It is not an error; it is a hundredfold latency regression that presents
+as "search feels slow".
+
+### Provisioning
+
+```bash
+export SUPABASE_ACCESS_TOKEN=sbp_...     # supabase.com/dashboard/account/tokens
+export SUPABASE_DB_PASSWORD='...'
+export SUPABASE_ORG_ID=...               # npx supabase orgs list
+./scripts/provision_supabase.sh
+```
+
+Creates the project, migrates through the direct connection, creates the
+non-owning role, loads a sample dataset, and then **verifies**: extension
+present, revision at head, 24 policies, and no table with RLS enabled but no
+policy.
 
 ---
 
