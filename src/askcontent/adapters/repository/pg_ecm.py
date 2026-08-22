@@ -147,7 +147,18 @@ class PgEcmRepository:
                 )
         return out
 
+    #: The connector's own credential. Ingest reads as this, and it is broad by
+    #: design — the platform must be able to index a document that only one
+    #: group may later read, or the corpus is limited to what everyone can see.
+    #:
+    #: This is precisely why the retrieval gate exists and re-checks per user
+    #: (CNT-ACL-01): what the ingest credential can read is *never* what an
+    #: asker is served. Conflating the two is the leak.
+    INGEST_PRINCIPAL = "service"
+
     def _forbidden(self, row, principal: str) -> bool:
+        if principal == self.INGEST_PRINCIPAL:
+            return False
         if principal in (row.forbidden_for or []):
             return True
         acl = list(row.acl_principals or [])

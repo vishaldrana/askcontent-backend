@@ -696,6 +696,43 @@ def _reciprocal_rank_fusion(
     return [(doc_id, score, ranks[doc_id]) for doc_id, score in ordered]
 
 
+class PopulationResult(BaseModel):
+    """What the connector can see, and what it could not read.
+
+    The failure this exists for: a required field the map does not cover makes
+    every document fail to map, and a population of zero looks identical to a
+    knowledgebase that is empty. One is a five-second fix on the mapping screen;
+    the other is a conversation with the knowledgebase owner.
+    """
+
+    documents: list[DocMetadata] = []
+    mapping_failures: int = 0
+    sample_errors: tuple[str, ...] = ()
+
+
+def scope_population_detailed(index, connector: Connector) -> PopulationResult:
+    population: list[DocMetadata] = []
+    failures = 0
+    errors: list[str] = []
+    cursor: str | None = None
+    while True:
+        page = index.list_documents(connector.kb_id, cursor=cursor)
+        for hit in page.hits:
+            outcome = apply_map(connector.field_map, hit.metadata, connector.kb_id)
+            if outcome.metadata is not None:
+                population.append(outcome.metadata)
+            else:
+                failures += 1
+                if len(errors) < 3:
+                    errors.append(f"{hit.doc_id}: {'; '.join(outcome.errors)}")
+        cursor = page.cursor
+        if not cursor:
+            break
+    return PopulationResult(
+        documents=population, mapping_failures=failures, sample_errors=tuple(errors)
+    )
+
+
 def scope_population(index, connector: Connector, principal: str = "service") -> list[DocMetadata]:
     """Every document the connector *could* see, mapped to canonical metadata.
 
@@ -704,15 +741,4 @@ def scope_population(index, connector: Connector, principal: str = "service") ->
     many documents are in this connector' has two implementations, one of them
     is wrong, and it is always the one shown to the customer.
     """
-    population: list[DocMetadata] = []
-    cursor: str | None = None
-    while True:
-        page = index.list_documents(connector.kb_id, cursor=cursor)
-        for hit in page.hits:
-            outcome = apply_map(connector.field_map, hit.metadata, connector.kb_id)
-            if outcome.metadata is not None:
-                population.append(outcome.metadata)
-        cursor = page.cursor
-        if not cursor:
-            break
-    return population
+    return scope_population_detailed(index, connector).documents

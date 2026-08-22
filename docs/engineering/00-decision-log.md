@@ -297,3 +297,71 @@ this is the cost of that speed. The recorded `parse_path` says which ran.
 
 Measured on the California summary: 1 block before, 22 after, 9 chunks with
 real heading paths.
+
+---
+
+## 2026-08-22 · Building our own index, and what was wrong before
+
+### The vector store was empty
+
+`askcontent.embedding` held **zero rows**. The HNSW index built in revisions
+0002/0003 had never seen one. Passage selection embedded every chunk of every
+candidate document **on every question** and discarded the vectors: correct
+answers, no benefit from content hashing, and the embedding cost paid per
+question rather than once.
+
+`services/indexing.py` now writes documents, chunks and vectors, and passage
+recovery reads them. Measured on the shared project: **104 documents, 379
+chunks, 379 embeddings**, true dimension 384 padded into the 1536-wide column
+with the real dimension recorded per row.
+
+Incrementality is real: a second run over unchanged content reports
+`0 parsed, 13 unchanged, 0 embedded`.
+
+The effect at query time is the point — an indexed document needs no fetch, no
+parse and no chunking, which are the three expensive stages. A technical-docs
+question answered in **208 ms** with all 13 candidates served from the store.
+
+### Python defaults are not database defaults
+
+Three `NotNullViolation`s in a row — `extras`, then `authority`, then
+`quarantined`, then the primary key — each on a different column, each because
+a SQLAlchemy `default=` is applied by SQLAlchemy and by nothing else. The
+indexing service writes raw SQL for throughput, so it hit every one.
+
+Fixing them at the call site would have fixed that one writer. Revisions 0006
+and 0007 generate `SET DEFAULT` for every NOT NULL column carrying a Python
+default, and `gen_random_uuid()` for every UUID primary key, from the ORM
+metadata. That fixes every writer, including the next one.
+
+### An unmapped required field looks exactly like an empty knowledgebase
+
+The technical-docs space calls its URL field `webui`; the POA space calls its
+identifier `docRef` and its date `lastReviewed`. The suggester recognised none
+of them, so every document failed to map — and `scope_population` dropped
+unmapped documents **silently**, leaving a population of zero.
+
+Zero documents because the map is wrong is a five-second fix on the mapping
+screen. Zero documents because the knowledgebase is empty is a conversation
+with its owner. They looked identical.
+
+`scope_population_detailed` now returns the failure count and sample errors,
+the indexer surfaces them, and the suggester knows the field names these five
+real vocabularies actually use.
+
+### The HNSW index is not used, and that is correct
+
+`EXPLAIN` shows a sequential scan. With `enable_seqscan=off` the planner uses
+`ix_embedding_vector_cosine`, so the index is present and usable — at 379 rows
+a scan is simply cheaper. Worth recording so nobody "fixes" it: the measurement
+to repeat is at corpus scale, not at fixture scale.
+
+### Ingest reads broadly; retrieval does not
+
+Indexing failed with `forbidden` on every technical-docs page, because it ran as
+`service` and those pages grant `group:engineering`.
+
+The platform must be able to index a document that only one group may later
+read, or the corpus is limited to what everyone can see. So the ingest
+credential reads broadly — and that is precisely why the retrieval gate
+re-checks per user on every question. Conflating the two is the leak.

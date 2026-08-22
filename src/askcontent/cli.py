@@ -2,6 +2,7 @@
 
     python -m askcontent.cli seed        register the fixture knowledgebases
                                          and connectors in the database
+    python -m askcontent.cli index       build chunks and vectors (incremental)
     python -m askcontent.cli status      what is actually deployed
     python -m askcontent.cli ask "..."   one question, end to end
 """
@@ -62,6 +63,26 @@ def seed() -> int:
     return 0
 
 
+def index(connector_id: str | None = None, limit: str | None = None) -> int:
+    """Build our own chunk and vector index for one connector, or all of them.
+
+    Incremental: a second run over unchanged content does no work.
+    """
+    from .services.indexing import IndexingService
+
+    platform = build_postgres()
+    service = IndexingService(platform, get_session_factory(), platform.registry.org_id)
+    targets = (
+        [platform.registry.get(connector_id)] if connector_id else platform.registry.list()
+    )
+    for connector in targets:
+        report = service.index_connector(connector, limit=int(limit) if limit else None)
+        print(" ", report.line())
+        for note in report.notes[:3]:
+            print("    note:", note)
+    return 0
+
+
 def status() -> int:
     print("database:", healthcheck())
     platform = build_postgres()
@@ -118,6 +139,8 @@ def main() -> int:
         return seed()
     if command == "status":
         return status()
+    if command == "index":
+        return index(*rest)
     if command == "ask":
         return ask(*rest)
     print(f"unknown command: {command}")

@@ -15,7 +15,14 @@ from pydantic import BaseModel
 from ..adapters.embedders.hashing import cosine
 from ..adapters.parsers.registry import parse_document
 from ..domain.chunks import CHUNKER_VERSION, Chunk, chunk_document
-from ..domain.documents import DocMetadata, DocRef, ParseHints, ParsedDocument
+from ..domain.documents import (
+    DocMetadata,
+    DocRef,
+    ParseHints,
+    ParsePath,
+    ParsedDocument,
+    ParseQuality,
+)
 
 
 class CacheEntry(BaseModel):
@@ -33,6 +40,57 @@ class PassageCacheStats(BaseModel):
         return self.hits / total if total else 0.0
 
 
+class StoredPassages:
+    """Chunks read from our own store, when we have them.
+
+    This is what makes the index worth building. A document that has been
+    indexed needs no fetch, no parse and no chunk at query time — the three
+    expensive stages — and the vectors were computed once rather than per
+    question.
+
+    The fetch-parse-chunk path stays as the fallback, because a document can be
+    a candidate before the indexer has reached it, and a question arriving in
+    that window should be answered rather than refused.
+    """
+
+    def __init__(self, engine, connector_uuid) -> None:
+        self._engine = engine
+        self._connector = connector_uuid
+
+    def load(self, doc_id: str) -> tuple[Chunk, ...] | None:
+        from sqlalchemy import text
+
+        from ..config import settings
+
+        schema = settings.db_schema
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    f"""
+                    SELECT c.chunk_id, c.ordinal, c.text, c.heading_path,
+                           c.parent_text, c.page, c.is_table
+                    FROM {schema}.document_chunk c
+                    JOIN {schema}.document d ON d.id = c.document_id
+                    WHERE c.connector_id = :c AND d.doc_id = :doc
+                    ORDER BY c.ordinal
+                    """
+                ),
+                {"c": self._connector, "doc": doc_id},
+            ).mappings().all()
+
+        if not rows:
+            return None
+        return tuple(
+            Chunk(
+                chunk_id=row["chunk_id"], doc_id=doc_id, text=row["text"],
+                heading_path=tuple(row["heading_path"] or ()),
+                ordinal=row["ordinal"], page=row["page"],
+                is_table=row["is_table"], parent_text=row["parent_text"] or "",
+            )
+            for row in rows
+        )
+
+
 class PassageService:
     """Fetch → parse → chunk, with a cache keyed on everything that can change
     the output (CNT-RET-10).
@@ -43,12 +101,16 @@ class PassageService:
     the single largest latency lever in the system.
     """
 
-    def __init__(self, repository, embedder, *, sandbox: bool = False) -> None:
+    def __init__(self, repository, embedder, *, sandbox: bool = False, stored=None) -> None:
         self.repository = repository
         self.embedder = embedder
         self.sandbox = sandbox
+        #: Our own indexed chunks. When present they short-circuit the whole
+        #: fetch-parse-chunk path.
+        self.stored = stored
         self._cache: dict[str, CacheEntry] = {}
         self.stats = PassageCacheStats()
+        self.from_store = 0
 
     def _key(self, metadata: DocMetadata, parser_version: str = "*") -> str:
         # CNT-RET-11: where the ECM exposes no version we fall back to the
@@ -63,6 +125,25 @@ class PassageService:
         if cached is not None:
             self.stats.hits += 1
             return cached
+
+        if self.stored is not None:
+            chunks = self.stored.load(metadata.doc_id)
+            if chunks:
+                # Indexed already: no fetch, no parse, no chunking. The parsed
+                # artefact is not reconstructed because nothing downstream reads
+                # it — the chunks are the citable unit.
+                self.from_store += 1
+                entry = CacheEntry(
+                    parsed=ParsedDocument(
+                        doc_id=metadata.doc_id, blocks=(),
+                        parser_id="stored", parser_version="-",
+                        parse_path=ParsePath.HTML_TRAFILATURA, quality=ParseQuality(),
+                    ),
+                    chunks=chunks,
+                )
+                self._cache[key] = entry
+                self.stats.hits += 1
+                return entry
 
         self.stats.misses += 1
         raw = self.repository.fetch(ref, principal)

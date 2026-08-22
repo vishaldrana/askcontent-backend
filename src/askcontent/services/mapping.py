@@ -293,13 +293,27 @@ def suggest_map(kb_id: str, field_names: list[str]) -> FieldMap:
             return Coercion.DATE_EPOCH
         return Coercion.DATE_ISO
 
-    date_source = find("modified", "updated", "revised", "issued", "published", "date")
+    # Every one of these is a real field name seen in the fixture's five
+    # vocabularies. The list grows by meeting knowledgebases, which is why the
+    # editor exists — a suggester that misses the field silently produces a
+    # corpus of zero documents, and zero looks exactly like "empty".
+    date_source = find(
+        "modified", "updated", "revised", "reviewed", "issued", "published",
+        "date", "changed", "effective",
+    )
     labels_source = find("tag", "label", "topic", "keyword", "categor", "flag")
 
     rules = [
-        FieldRule(target="doc_id", source=find("docid", "documentnumber", "pageid", "id")),
+        FieldRule(target="doc_id", source=find(
+            "docid", "docref", "documentnumber", "contentid", "pageid",
+            "controldocid", "matterdocid", "uid", "id",
+        )),
         FieldRule(target="title", source=find("title", "name", "heading", "subject")),
-        FieldRule(target="url", source=find("url", "link", "href", "uri")),
+        # Confluence calls it `webui`, SharePoint `webUrl`, some exports
+        # `self` or `_links`. A suggester that only knows "url" leaves the
+        # required field unmapped, every document then fails to map, and the
+        # corpus is empty for a reason nobody can see.
+        FieldRule(target="url", source=find("url", "link", "href", "uri", "webui", "web", "self", "location", "permalink")),
         FieldRule(target="updated_at", source=date_source, coercion=guess_date_coercion(date_source)),
         FieldRule(target="space", source=find("space", "team", "domain", "site", "practice")),
         FieldRule(target="owner", source=find("owner", "maintainer", "custodian", "accountable")),

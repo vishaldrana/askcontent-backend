@@ -83,10 +83,64 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     org_id = _ensure_org(sessions, org_slug)
     registry = PgRegistry(sessions, org_id)
 
+    # Passage recovery reads our own indexed chunks first. Without this the
+    # index is a store nothing reads: every question would still fetch, parse
+    # and chunk each candidate from scratch.
+    from .services.passages import StoredPassages
+
+    passages.stored = _StoredPassagesRouter(engine, sessions, org_id)
+
     return Platform(
         index=index, repository=repository, embedder=embedder, reranker=reranker,
         passages=passages, retrieval=retrieval, registry=registry,
     )
+
+
+class _StoredPassagesRouter:
+    """Resolves a document to the chunks of whichever connector indexed it.
+
+    Passage recovery is per question and the connector is known then, but the
+    service is built once — so the lookup is by document, scoped to the
+    organisation, and the connector filter is applied in the query.
+    """
+
+    def __init__(self, engine, sessions, org_id) -> None:
+        self._engine = engine
+        self._sessions = sessions
+        self._org = org_id
+
+    def load(self, doc_id: str):
+        from sqlalchemy import text
+
+        from .config import settings
+        from .domain.chunks import Chunk
+
+        schema = settings.db_schema
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    f"""
+                    SELECT c.chunk_id, c.ordinal, c.text, c.heading_path,
+                           c.parent_text, c.page, c.is_table
+                    FROM {schema}.document_chunk c
+                    JOIN {schema}.document d ON d.id = c.document_id
+                    WHERE c.org_id = :org AND d.doc_id = :doc
+                    ORDER BY c.ordinal
+                    """
+                ),
+                {"org": self._org, "doc": doc_id},
+            ).mappings().all()
+        if not rows:
+            return None
+        return tuple(
+            Chunk(
+                chunk_id=r["chunk_id"], doc_id=doc_id, text=r["text"],
+                heading_path=tuple(r["heading_path"] or ()), ordinal=r["ordinal"],
+                page=r["page"], is_table=r["is_table"],
+                parent_text=r["parent_text"] or "",
+            )
+            for r in rows
+        )
 
 
 def _ensure_org(sessions, slug: str):
@@ -218,6 +272,19 @@ def _seed_connectors(platform: Platform) -> None:
             authority=(
                 AuthorityRule(label="state-guideline", tier=AuthorityTier.AUTHORITATIVE),
                 AuthorityRule(label="internal-procedure", tier=AuthorityTier.AUTHORITATIVE),
+            ),
+            state=ConnectorState.ACTIVE,
+        ),
+        dict(
+            connector_id="cn-engineering",
+            name="Engineering — platform documentation",
+            business_group="Platform Engineering",
+            kb_id="kb-techdocs", space="ENG",
+            exclude=(),
+            groups=("group:engineering",),
+            ceiling=Sensitivity.INTERNAL,
+            authority=(
+                AuthorityRule(label="approved", tier=AuthorityTier.AUTHORITATIVE),
             ),
             state=ConnectorState.ACTIVE,
         ),
