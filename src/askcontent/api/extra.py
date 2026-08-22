@@ -12,7 +12,7 @@ import json
 import secrets
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -217,6 +217,7 @@ def materialise(slug: str, body: Materialise) -> dict:
         pinned_out = {d for d, r in existing.items() if r["pinned"] == "out"}
 
         added = [d for d in candidates if d not in existing and d not in pinned_out]
+        refresh = [d for d in candidates if d in existing]
         removed = [
             d for d, r in existing.items()
             if d not in candidates and r["state"] == "member" and d not in pinned_in
@@ -239,7 +240,7 @@ def materialise(slug: str, body: Materialise) -> dict:
             return result
 
         auto = collection["auto_accept_enumerable"]
-        for doc_id in added:
+        for doc_id in added + refresh:
             hit = candidates[doc_id]
             enumerable_only = all(
                 any(r["enumerable"] for r in rules if str(r["id"]) == rid)
@@ -252,7 +253,14 @@ def materialise(slug: str, body: Materialise) -> dict:
                      resolved_via, resolve_score, state)
                 VALUES (:org, :cid, :doc, :kb, :title, :url, :by, :via, :score, :state)
                 ON CONFLICT (collection_id, doc_id) DO UPDATE
-                  SET contributed_by = EXCLUDED.contributed_by, missing_since = NULL
+                  SET contributed_by = EXCLUDED.contributed_by,
+                      -- Refresh the display copy too. A member whose title was
+                      -- captured before the index had one would otherwise show
+                      -- its identifier forever.
+                      title = coalesce(EXCLUDED.title, {S}.collection_member.title),
+                      url = coalesce(EXCLUDED.url, {S}.collection_member.url),
+                      kb_id = coalesce(EXCLUDED.kb_id, {S}.collection_member.kb_id),
+                      missing_since = NULL
             """), {"org": _org(session), "cid": collection["id"], "doc": doc_id,
                    "kb": hit.get("kb_id"), "title": hit.get("title"), "url": hit.get("url"),
                    "by": hit["contributed_by"], "via": hit.get("rung"),
@@ -930,3 +938,247 @@ def _compose(evidence) -> list[str]:
     for notice in evidence.notices:
         out.append(f" {notice} ")
     return out
+
+
+# -------------------------------------------------------------------- uploads
+
+
+ACCEPT_REASONS = {
+    "not_in_index": "Not held in the index at all",
+    "restricted": "Held elsewhere but cannot be indexed centrally",
+    "unresolvable": "Indexed, but no URL or identifier resolves to it",
+}
+
+
+@router.post("/api/collections/{slug}/uploads")
+async def upload_file(slug: str, request: Request):
+    """Accept a file — after checking whether the index already has it.
+
+    Order matters and is not cosmetic (CNT-COL-20): upload is offered *after*
+    resolution has failed, because a group that starts by uploading will upload
+    things the index already holds. A second copy is not a convenience, it is a
+    divergence with a date on it: the copy gets answered from after the original
+    changes, and the reader who follows the citation sees something the system
+    of record no longer says.
+    """
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None:
+        raise HTTPException(400, "no file")
+
+    blob = await upload.read()
+    filename = upload.filename or "upload"
+    reason = str(form.get("reason") or "")
+    actor = str(form.get("actor") or "admin")
+
+    if reason and reason not in ACCEPT_REASONS:
+        raise HTTPException(400, f"unknown reason {reason}")
+
+    from ..adapters.parsers.registry import parse_document
+    from ..adapters.parsers.sniff import sniff
+    from ..domain.chunks import CHUNKER_VERSION
+    from ..domain.ids import file_hash, text_hash
+
+    mime = sniff(blob, upload.content_type)
+    parsed = parse_document(filename, blob, declared_mime=mime, sandbox=False)
+    fhash = file_hash(blob)
+    thash = (
+        text_hash(parsed.full_text(), parsed.parser_id, parsed.parser_version, CHUNKER_VERSION)
+        if not parsed.refused else None
+    )
+    title = _title_of(parsed, filename)
+
+    duplicates = _find_duplicates(title, filename)
+
+    with _sessions()() as session:
+        collection = _collection_row(session, slug)
+        existing = session.execute(text(
+            f"SELECT id, filename FROM {S}.upload WHERE org_id = :o AND file_hash = :h"
+        ), {"o": _org(session), "h": fhash}).mappings().one_or_none()
+        if existing:
+            # The same bytes, already here. Silently creating a second row would
+            # make the corpus disagree with itself for no reason at all.
+            return {
+                "status": "already_uploaded",
+                "filename": existing["filename"],
+                "message": f"These exact bytes were already uploaded as "
+                           f"{existing['filename']}.",
+            }
+
+        status = "pending" if (duplicates and not reason) else "accepted"
+        uid = session.execute(text(f"""
+            INSERT INTO {S}.upload (org_id, collection_id, filename, mime, size_bytes,
+                file_hash, text_hash, parser_id, parser_version, parse_path,
+                parse_quality, refusal_reason, title, blob, accepted_reason,
+                accepted_by, duplicate_of, status)
+            VALUES (:o, :c, :f, :m, :sz, :fh, :th, :pid, :pv, :pp, :pq, :rr, :t,
+                    :blob, :reason, :actor, :dup, :status)
+            RETURNING id
+        """), {
+            "o": _org(session), "c": collection["id"], "f": filename, "m": mime,
+            "sz": len(blob), "fh": fhash, "th": thash,
+            "pid": parsed.parser_id, "pv": parsed.parser_version,
+            "pp": str(parsed.parse_path),
+            "pq": json.dumps(parsed.quality.model_dump(mode="json")),
+            "rr": parsed.refusal_reason, "t": title, "blob": blob,
+            "reason": reason or None, "actor": actor,
+            "dup": duplicates[0]["doc_id"] if duplicates else None,
+            "status": status,
+        }).scalar_one()
+
+        if status == "accepted":
+            session.execute(text(f"""
+                INSERT INTO {S}.collection_member
+                    (org_id, collection_id, doc_id, title, state, resolved_via)
+                VALUES (:o, :c, :d, :t, 'member', 'upload')
+                ON CONFLICT (collection_id, doc_id) DO NOTHING
+            """), {"o": _org(session), "c": collection["id"],
+                   "d": f"upload:{uid}", "t": title})
+        session.commit()
+
+    return {
+        "id": str(uid),
+        "status": status,
+        "filename": filename,
+        "mime": mime,
+        "size_bytes": len(blob),
+        "title": title,
+        "parse_path": str(parsed.parse_path),
+        "refused": parsed.refused,
+        "refusal_reason": parsed.refusal_reason,
+        "blocks": len(parsed.blocks),
+        # The check that stops a duplicate becoming a divergence.
+        "duplicates": duplicates,
+        "reasons": ACCEPT_REASONS,
+        "message": (
+            f"This looks like {duplicates[0]['title']} ({duplicates[0]['doc_id']}), "
+            f"which is already in the index. Use that instead, or say why a copy "
+            f"is needed."
+            if duplicates and status == "pending"
+            else "Accepted."
+        ),
+    }
+
+
+def _title_of(parsed, filename: str) -> str:
+    """The document's own title, then a heading, then the filename.
+
+    Never the first block of body text: for a PDF that is the title run
+    together with the opening paragraph, and searching the index with a whole
+    paragraph ranks the *right* document third. That is how the first version
+    of the duplicate check missed a document the index plainly held.
+    """
+    if parsed.title:
+        return parsed.title.strip()[:200]
+    for block in parsed.blocks:
+        if str(block.kind) == "heading" and block.text.strip():
+            return block.text.strip()[:200]
+    for block in parsed.blocks:
+        text = block.text.strip()
+        if text:
+            # First sentence, and only if it is short enough to be a title.
+            head = text.split(". ")[0]
+            return (head if len(head) <= 120 else text[:120])[:200]
+    return filename.rsplit(".", 1)[0].replace("-", " ").replace("_", " ")
+
+
+def _find_duplicates(title: str, filename: str) -> list[dict]:
+    """Is this already in the index?
+
+    Checked by title and by filename slug, which is what the platform can see
+    without holding a hash of every indexed document. It will not catch a
+    re-typed document under a different name — and that limitation is the
+    argument for asking the index owners for content hashes.
+    """
+    from ..ports.content_index import IndexFilters
+
+    platform = _platform()
+    probe = title or filename
+    seen: dict[str, dict] = {}
+    for kb in platform.index.list_knowledgebases():
+        try:
+            page = platform.index.search(kb.kb_id, probe, IndexFilters(), k=3)
+        except Exception:  # noqa: BLE001
+            continue
+        for hit in page.hits:
+            meta = hit.metadata or {}
+            hit_title = str(meta.get("title") or "")
+            # Title equality is the reliable signal; similarity is the fallback.
+            # A vector score is a statement about prose, and two different
+            # documents about the same subject score highly against each other.
+            if _same_slug(hit_title, probe) or hit.score > 0.72:
+                seen[hit.doc_id] = {
+                    "doc_id": hit.doc_id, "kb_id": hit.kb_id,
+                    "title": hit_title or hit.doc_id,
+                    "url": meta.get("url"), "score": round(hit.score, 3),
+                }
+    return sorted(seen.values(), key=lambda d: -d["score"])[:3]
+
+
+def _same_slug(a: str, b: str) -> bool:
+    import re
+
+    norm = lambda v: "-".join(re.findall(r"[a-z0-9]+", (v or "").lower()))  # noqa: E731
+    return bool(a) and norm(a) == norm(b)
+
+
+@router.get("/api/collections/{slug}/uploads")
+def list_uploads(slug: str) -> list[dict]:
+    with _sessions()() as session:
+        collection = _collection_row(session, slug)
+        rows = session.execute(text(f"""
+            SELECT id, filename, mime, size_bytes, title, parse_path, refusal_reason,
+                   accepted_reason, duplicate_of, status, created_at
+            FROM {S}.upload WHERE collection_id = :c ORDER BY created_at DESC
+        """), {"c": collection["id"]}).mappings().all()
+        return [dict(r) | {"id": str(r["id"])} for r in rows]
+
+
+class UploadDecision(BaseModel):
+    reason: str
+    actor: str = "admin"
+
+
+@router.post("/api/collections/{slug}/uploads/{upload_id}/accept")
+def accept_upload(slug: str, upload_id: str, body: UploadDecision) -> dict:
+    """Accept a duplicate anyway, on the record.
+
+    The reason is required, not optional. Without it the pile of uploads says
+    only "people uploaded things"; with it, it says which knowledgebases are
+    missing from the index — which is the case for putting them there.
+    """
+    if body.reason not in ACCEPT_REASONS:
+        raise HTTPException(400, f"unknown reason {body.reason}")
+    with _sessions()() as session:
+        collection = _collection_row(session, slug)
+        row = session.execute(text(f"""
+            UPDATE {S}.upload SET status = 'accepted', accepted_reason = :r,
+                   accepted_by = :a, updated_at = now()
+            WHERE id = :u AND collection_id = :c RETURNING title
+        """), {"r": body.reason, "a": body.actor, "u": upload_id,
+               "c": collection["id"]}).mappings().one_or_none()
+        if row is None:
+            raise HTTPException(404, "unknown upload")
+        session.execute(text(f"""
+            INSERT INTO {S}.collection_member
+                (org_id, collection_id, doc_id, title, state, resolved_via)
+            VALUES (:o, :c, :d, :t, 'member', 'upload')
+            ON CONFLICT (collection_id, doc_id) DO NOTHING
+        """), {"o": _org(session), "c": collection["id"],
+               "d": f"upload:{upload_id}", "t": row["title"]})
+        session.commit()
+    return {"id": upload_id, "status": "accepted", "reason": body.reason}
+
+
+@router.delete("/api/collections/{slug}/uploads/{upload_id}")
+def delete_upload(slug: str, upload_id: str) -> dict:
+    with _sessions()() as session:
+        collection = _collection_row(session, slug)
+        session.execute(text(
+            f"DELETE FROM {S}.upload WHERE id = :u AND collection_id = :c"
+        ), {"u": upload_id, "c": collection["id"]})
+        session.execute(text(
+            f"DELETE FROM {S}.collection_member WHERE collection_id = :c AND doc_id = :d"
+        ), {"c": collection["id"], "d": f"upload:{upload_id}"})
+        session.commit()
+    return {"deleted": upload_id}

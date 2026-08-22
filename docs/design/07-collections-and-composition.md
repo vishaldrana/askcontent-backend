@@ -288,3 +288,63 @@ is not a member is not in scope, whatever the scope says.
 incomplete; scope is wrong when it is over-broad. Collapsing them into one
 control means every fix to one risks the other, and the audit can no longer say
 which decision let a document through.
+
+---
+
+## 10. What was built, and what the build changed
+
+### Sub-pages are a path-prefix expansion, not a platform API
+
+`url_list` takes `include_descendants`. A resolved URL contributes its document
+*and* everything beneath its path.
+
+The alternative — asking each platform for a page tree — is one integration per
+platform for the same answer, because every hierarchical system already encodes
+the hierarchy in the path and the index already holds it. Confluence,
+SharePoint, a wiki and a plain intranet all work through one rule.
+
+Measured on the fixture: pasting `https://ecm.example.com/legal/poa` with
+sub-pages enabled contributes **11 documents** — the section page, two
+sub-sections, five state summaries, two internal procedures and a scanned
+specimen.
+
+The limitation is real and worth stating: expansion runs from a **resolved
+page**. A section root that is not itself a document has nothing to expand from,
+and `pgp_path_prefix` is the rule for that case.
+
+### Confluence has two doors, and the native one may not be needed
+
+`confluence_space` binds a space through the Confluence API; `url_list` handles
+a Confluence page exactly as it handles anything else.
+
+The open question sits in the adapter: **is the space already in PGP?** If it
+is, `pgp_space` does the job with no second credential, no second rate limit and
+no second copy. Build the native integration only for spaces the index does not
+reach — a native integration that duplicates the index is a second system of
+record.
+
+### The duplicate check is only as good as the title
+
+The first implementation searched the index using the first block of extracted
+text. For a PDF that block is the title run together with the opening
+paragraph, and it ranked the correct document **third** — so a California
+statutory summary the index plainly held was accepted as new.
+
+`ParsedDocument` now carries the title the *document* declares: a PDF's Info
+dictionary, an HTML `<title>`. Duplicate detection matches on title equality
+first and similarity second, because a similarity score is a statement about
+prose and two different documents on one subject score highly against each
+other.
+
+With the declared title the same upload is held at **0.797** against
+`LGL-POA-CA`, with the message naming the document to use instead.
+
+### Accepting a duplicate is a decision on the record
+
+A held upload is not rejected — sometimes a copy is genuinely needed. It
+requires a reason from a closed set: `not_in_index`, `restricted`,
+`unresolvable`. The reason is stored with the actor.
+
+Without it the upload table says only that people uploaded things. With it, the
+table says **which knowledgebases are missing from the index**, which is the
+case for putting them there.

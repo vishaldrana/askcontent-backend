@@ -23,6 +23,7 @@ from ...domain.documents import (
 )
 
 _TAG = re.compile(r"<[^>]+>")
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 _SCRIPT_STYLE = re.compile(
     r"<(script|style|noscript)\b.*?</\1>", re.I | re.S
 )
@@ -55,6 +56,11 @@ class HtmlParser:
             source = blob.decode("utf-8")
         except UnicodeDecodeError:
             source = blob.decode("latin-1", errors="replace")
+
+        declared_title = None
+        title_match = _TITLE.search(source)
+        if title_match:
+            declared_title = _clean(_text(title_match.group(1))) or None
 
         source = _SCRIPT_STYLE.sub(" ", source)
 
@@ -164,6 +170,7 @@ class HtmlParser:
             blocks=tuple(blocks),
             parser_id=self.parser_id,
             parser_version=self.parser_version,
+            title=declared_title,
             parse_path=ParsePath.HTML_TRAFILATURA,
             quality=ParseQuality(
                 block_count=len(blocks),

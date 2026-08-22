@@ -176,6 +176,12 @@ class ParsedDocument(BaseModel):
     parser_version: str
     parse_path: ParsePath
     quality: ParseQuality
+    #: The title the *document* declares — a PDF's Info dictionary, an HTML
+    #: `<title>`. Distinct from the first block of body text, which is what you
+    #: get by guessing, and which for a PDF is the title run together with the
+    #: opening paragraph. Duplicate detection depends on the difference: the
+    #: real title matches an indexed document, the merged paragraph does not.
+    title: str | None = None
     refusal_reason: str | None = None
 
     @property

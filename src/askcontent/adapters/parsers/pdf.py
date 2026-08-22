@@ -56,7 +56,10 @@ OCR_CONFIDENCE_FLOOR = 0.70
 
 class PdfParser:
     parser_id = "pdf-ladder"
-    parser_version = "1.0.0"
+    parser_version = "1.1.0"
+
+    def __init__(self) -> None:
+        self._last_title: str | None = None
 
     def supports(self, mime: str) -> bool:
         return mime == "application/pdf"
@@ -129,6 +132,10 @@ class PdfParser:
 
         try:
             document = pdfium.PdfDocument(blob)
+            try:
+                self._last_title = (document.get_metadata_dict() or {}).get("Title") or None
+            except Exception:  # noqa: BLE001 - metadata is a bonus, never a gate
+                self._last_title = None
             pages = []
             for index in range(min(len(document), hints.max_pages)):
                 page = document[index]
@@ -267,6 +274,7 @@ class PdfParser:
             blocks=tuple(blocks),
             parser_id=self.parser_id,
             parser_version=self.parser_version,
+            title=self._last_title,
             parse_path=path,
             quality=ParseQuality(
                 text_yield_per_page=yield_per_page,

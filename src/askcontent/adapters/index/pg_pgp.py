@@ -189,7 +189,7 @@ class PgPgpIndex:
         # No join at all. The index is a separate system; reaching into the
         # store from here is the mistake this whole file exists to avoid.
         sql = f"""
-            SELECT e.doc_id, e.raw_metadata,
+            SELECT e.doc_id, e.raw_metadata, e.facets,
                    1 - (e.embedding <=> CAST(:q AS vector)) AS score
             FROM ecm_stub.pgp_index_entry e
             WHERE {' AND '.join(clauses)}
@@ -208,9 +208,7 @@ class PgPgpIndex:
                 doc_id=row.doc_id,
                 kb_id=kb_id,
                 score=float(row.score),
-                metadata=row.raw_metadata
-                if isinstance(row.raw_metadata, dict)
-                else json.loads(row.raw_metadata),
+                metadata=_merge(row.raw_metadata, row.facets),
             )
             for row in rows
             if row.score > 0.02
@@ -226,7 +224,7 @@ class PgPgpIndex:
             rows = connection.execute(
                 text(
                     """
-                    SELECT doc_id, raw_metadata FROM ecm_stub.pgp_index_entry
+                    SELECT doc_id, raw_metadata, facets FROM ecm_stub.pgp_index_entry
                     WHERE kb_id = :kb ORDER BY doc_id LIMIT :limit OFFSET :offset
                     """
                 ),
@@ -243,9 +241,12 @@ class PgPgpIndex:
                     doc_id=row.doc_id,
                     kb_id=kb_id,
                     score=0.0,
-                    metadata=row.raw_metadata
-                    if isinstance(row.raw_metadata, dict)
-                    else json.loads(row.raw_metadata),
+                    # The knowledgebase's own vocabulary, plus the index's
+                    # canonical facet copy. A caller that wants the raw field
+                    # names still has them; a caller that just wants the title
+                    # should not have to know that this knowledgebase spells it
+                    # `docTitle` and the next one spells it `heading`.
+                    metadata=_merge(row.raw_metadata, row.facets),
                 )
                 for row in rows
             ),
@@ -367,6 +368,12 @@ class PgPgpIndex:
                 ),
                 params,
             ).all()
+
+
+def _merge(raw, facets) -> dict:
+    raw = raw if isinstance(raw, dict) else json.loads(raw or "{}")
+    facets = facets if isinstance(facets, dict) else json.loads(facets or "{}")
+    return {**raw, **{k: v for k, v in facets.items() if v is not None}}
 
 
 def _slugify(value: str) -> str:
