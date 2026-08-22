@@ -252,3 +252,133 @@ class PgPgpIndex:
             cursor=str(offset + len(rows)) if offset + len(rows) < total else None,
             total_estimate=total,
         )
+
+    # -- URL resolution ----------------------------------------------------
+
+    def resolve_urls(
+        self, urls: list[str], kb_ids: tuple[str, ...] = ()
+    ) -> dict[str, list[dict]]:
+        """Which indexed document does each URL name?
+
+        One request for the whole batch, which is only possible because this
+        index filters on the URL field. Where PGP cannot, every URL degrades to
+        rung 5/6 and the paste screen becomes review work — see the port's
+        open question.
+
+        Rungs 1, 2, 4, 5 and 6 are implemented here. Rung 3 (redirect) needs a
+        network call the platform deliberately does not make: following a
+        redirect means fetching, and this feature exists precisely so that
+        nothing is fetched. A deployment that wants it resolves redirects in the
+        crawler, not here.
+        """
+        from ...domain.urls import Candidate, Rung, normalise
+        from ...services.url_resolution import DEFAULT_POLICY
+
+        if not urls:
+            return {}
+
+        keys = {url: normalise(url, DEFAULT_POLICY) for url in urls}
+        slugs = {
+            url: (key.rstrip("/").rsplit("/", 1)[-1] or "").lower()
+            for url, key in keys.items()
+        }
+
+        clauses = ["e.facets ? 'url'"]
+        params: dict[str, object] = {}
+        if kb_ids:
+            clauses.append("e.kb_id = ANY(:kbs)")
+            params["kbs"] = list(kb_ids)
+
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    f"""
+                    SELECT e.doc_id, e.kb_id,
+                           e.facets->>'title' AS title,
+                           e.facets->>'url'   AS url,
+                           coalesce(
+                             (SELECT array_agg(a) FROM jsonb_array_elements_text(
+                                 coalesce(e.facets->'alt_urls', '[]'::jsonb)) a),
+                             '{{}}'::text[]) AS alt_urls
+                    FROM ecm_stub.pgp_index_entry e
+                    WHERE {' AND '.join(clauses)}
+                    """
+                ),
+                params,
+            ).all()
+
+        # Built once for the batch. A per-URL query would be one round trip per
+        # pasted link, and people paste eighty at a time.
+        by_url: dict[str, list] = {}
+        by_alt: dict[str, list] = {}
+        by_title: dict[str, list] = {}
+        for row in rows:
+            by_url.setdefault(normalise(row.url, DEFAULT_POLICY), []).append(row)
+            for alt in row.alt_urls or []:
+                by_alt.setdefault(normalise(alt, DEFAULT_POLICY), []).append(row)
+            by_title.setdefault(_slugify(row.title), []).append(row)
+
+        out: dict[str, list[dict]] = {}
+        for url in urls:
+            key = keys[url]
+            found: list[Candidate] = []
+
+            for row in by_url.get(key, []):
+                found.append(_candidate(row, Rung.EXACT))
+            if not found:
+                for row in by_alt.get(key, []):
+                    found.append(_candidate(row, Rung.ALIAS))
+            if not found:
+                # Path match: same document, different query string entirely.
+                path = "//" + key.split("//", 1)[-1].split("?", 1)[0] if "//" in key else key
+                for row in by_url.get(path.split("?")[0], []):
+                    found.append(_candidate(row, Rung.PATH))
+            if not found and slugs[url]:
+                for row in by_title.get(_slugify(slugs[url]), []):
+                    found.append(_candidate(row, Rung.TITLE, 1.0))
+            if not found and slugs[url]:
+                for row in self._search_slug(slugs[url], kb_ids):
+                    found.append(_candidate(row, Rung.SEARCH, 1.0))
+
+            out[url] = [c.model_dump() for c in found]
+        return out
+
+    def _search_slug(self, slug: str, kb_ids: tuple[str, ...]):
+        terms = [t for t in slug.replace("-", " ").replace("_", " ").split() if len(t) > 2]
+        if not terms:
+            return []
+        clauses = ["e.facets ? 'title'"]
+        params: dict[str, object] = {"q": " | ".join(terms)}
+        if kb_ids:
+            clauses.append("e.kb_id = ANY(:kbs)")
+            params["kbs"] = list(kb_ids)
+        with self._engine.connect() as connection:
+            return connection.execute(
+                text(
+                    f"""
+                    SELECT e.doc_id, e.kb_id, e.facets->>'title' AS title,
+                           e.facets->>'url' AS url, '{{}}'::text[] AS alt_urls
+                    FROM ecm_stub.pgp_index_entry e
+                    WHERE {' AND '.join(clauses)}
+                      AND to_tsvector('english', e.facets->>'title')
+                          @@ to_tsquery('english', :q)
+                    ORDER BY e.doc_id LIMIT 5
+                    """
+                ),
+                params,
+            ).all()
+
+
+def _slugify(value: str) -> str:
+    import re
+
+    return "-".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def _candidate(row, rung, rung_score: float = 1.0):
+    from ...domain.urls import Candidate
+
+    return Candidate(
+        doc_id=row.doc_id, kb_id=row.kb_id, title=row.title or row.doc_id,
+        url=row.url or "", rung=rung, rung_score=rung_score,
+    )

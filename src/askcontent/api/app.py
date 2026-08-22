@@ -132,6 +132,28 @@ def validate_field_map(kb_id: str, body: ValidateMapRequest) -> dict:
     return validation.model_dump(mode="json") | {"can_activate": validation.can_activate}
 
 
+class ResolveUrlsRequest(BaseModel):
+    text: str
+    kb_ids: tuple[str, ...] = ()
+
+
+@app.post("/api/urls/resolve")
+def resolve_urls(body: ResolveUrlsRequest) -> dict:
+    """Resolve pasted links to documents that already exist in the index.
+
+    Nothing is fetched. The naive reading — "paste a URL, we'll download it" —
+    creates a second copy of a document the system of record already holds, and
+    that copy diverges the moment the original changes.
+    """
+    from ..services.url_resolution import UrlResolutionService
+
+    summary = UrlResolutionService(platform.index).resolve_text(body.text, body.kb_ids)
+    return summary.model_dump(mode="json") | {
+        "summary_line": summary.line(),
+        "needs_review": summary.needs_review,
+    }
+
+
 # ---------------------------------------------------------------- connectors
 
 

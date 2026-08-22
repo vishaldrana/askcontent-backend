@@ -94,6 +94,30 @@ class ContentIndex(Protocol):
         cursor: str | None = None,
     ) -> IndexPage: ...
 
+    def resolve_urls(
+        self, urls: list[str], kb_ids: tuple[str, ...] = ()
+    ) -> dict[str, list[object]]:
+        """Find the indexed documents a set of URLs names.
+
+        REAL CALL: PGP has no single endpoint for this. Expect to build it from
+        what the index does offer, in this order of preference:
+
+          1. a metadata filter on the canonical URL field, if the index will
+             filter on it — one request for the whole batch;
+          2. a metadata filter on a document-id extracted from the URL, for
+             platforms that mint id-bearing permalinks;
+          3. full-text search on the final path segment, as the last rung.
+
+        OPEN Q, and it decides how good this feature is: **does PGP index the
+        document's URL as a filterable field?** If it does, resolution is one
+        cheap request and most pasted links resolve at rung 1. If it does not,
+        every URL degrades to a search on its slug, which lands in the ambiguous
+        band far more often and turns the paste screen into review work.
+
+        Ask for the URL field before building anything else here.
+        """
+        ...
+
     def list_documents(
         self, kb_id: str, cursor: str | None = None, page_size: int = 500
     ) -> IndexPage:
