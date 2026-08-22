@@ -501,7 +501,7 @@ class RetrievalService:
                     staleness=state,
                     heading_path=chunk.heading_path,
                     labels=metadata.labels,
-                    span=chunk.text[:600],
+                    span=_span_of(chunk),
                     rerank_score=round(float(result.score), 6),
                     fusion_rank=candidate.fusion_rank or 0,
                 )
@@ -525,6 +525,22 @@ class RetrievalService:
             )
 
         return citations, conflicts, notices
+
+
+def _span_of(chunk) -> str:
+    """The passage a reader sees.
+
+    The chunk keeps its heading inline because the embedding needs it — the
+    heading path is what separates "Rate limits" under two different parents.
+    The *citation* renders that path above the span already, so leaving the
+    markdown heading in the text shows it twice, once as chrome and once as
+    literal `## Detail`.
+    """
+    text = chunk.text
+    lines = text.split("\n")
+    if lines and lines[0].lstrip().startswith("#"):
+        text = "\n".join(lines[1:]).lstrip("\n")
+    return text[:600]
 
 
 def _fingerprint(text: str) -> str:
