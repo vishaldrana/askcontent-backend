@@ -17,8 +17,12 @@ design hard, rather than a tidy set that any pipeline would handle:
   * Near-duplicate documents across two spaces, one canonical.
   * Two authoritative documents that contradict each other.
 
-Replace with: a fixture export taken from the real systems once access exists,
-keeping every property above represented.
+Generated from `askcontent-sample-data` (the `retail-bank` dataset, HTML
+documents only). Regenerate rather than hand-editing: the sample-data repo is
+where the corpus is designed, and this is the offline smoke copy of it.
+
+PDF documents are deliberately excluded — a committed fixture does not need to
+carry binary, and the PDF paths are exercised against a loaded database.
 """
 
 from __future__ import annotations
@@ -67,318 +71,264 @@ def _page(*sections: tuple[str, str]) -> str:
 
 
 SEED: list[SeedDoc] = [
-    # ---------------------------------------------------------------- HR ---
     SeedDoc(
-        doc_id="HR-1041",
-        kb_id="kb-hr-policies",
-        title="Parental Leave Policy",
-        path="/hr/policies/parental-leave",
-        space="HR",
-        owner="dana.okafor@example.com",
-        labels=("policy", "benefits", "approved"),
-        updated_at=_days_ago(45),
-        body_html=_page(
-            (
-                "Purpose",
-                "<p>This policy sets out paid and unpaid parental leave for all "
-                "permanent employees. Policy owner: People Operations. "
-                "Effective date: 1 March 2026. Approved by: the Remuneration "
-                "Committee.</p>",
-            ),
-            (
-                "Entitlement",
-                "<p>A primary caregiver is entitled to <b>18 weeks</b> of paid "
-                "parental leave. A secondary caregiver is entitled to 6 weeks "
-                "of paid leave. Both entitlements are available in the 24 "
-                "months following birth or placement.</p>"
-                "<table><tr><th>Caregiver</th><th>Paid weeks</th>"
-                "<th>Unpaid weeks</th></tr>"
-                "<tr><td>Primary</td><td>18</td><td>34</td></tr>"
-                "<tr><td>Secondary</td><td>6</td><td>12</td></tr></table>",
-            ),
-            (
-                "Applying",
-                "<p>Submit form PL-1 through the People portal at least 10 "
-                "weeks before the intended start date. Late applications are "
-                "considered but cannot be guaranteed.</p>",
-            ),
-        ),
+        doc_id='CB-POL-1041',
+        kb_id='kb-consumer-policy',
+        title='Consumer Deposit Account Fee Schedule',
+        path='/consumer/policies/deposit-fee-schedule',
+        space='CONSUMER',
+        owner='deposit.products@wellsfargo.example',
+        labels=('policy', 'approved', 'customer-facing', 'reg-dd'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-07-15T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>Purpose</h2>\n<p>This schedule sets the fees applied to consumer deposit accounts. It is the controlling document for all channels: branch, contact centre, online and mobile. Policy owner: Deposit Products. Effective date: 1 July 2026. Approved by: the Consumer Banking Pricing Committee.</p>\n<h2>Overdraft and returned item fees</h2>\n<p>An overdraft fee of <b>$35</b> is assessed per item when an item is paid into overdraft. No more than <b>three</b> overdraft fees are assessed per business day. No overdraft fee is assessed when the account is overdrawn by <b>$5 or less</b> at the end of the business day.</p><table><tr><th>Fee</th><th>Amount</th><th>Daily cap</th></tr><tr><td>Overdraft (item paid)</td><td>$35</td><td>3 per day</td></tr><tr><td>Returned item (item declined)</td><td>$0</td><td>—</td></tr><tr><td>Overdraft protection transfer</td><td>$12.50</td><td>1 per day</td></tr></table>\n<h2>Monthly service fee</h2>\n<p>The monthly service fee for Everyday Checking is $10 and is waived when any one of the following applies during the statement period: $500 or more in total qualifying direct deposits, a $500 minimum daily balance, or a primary account owner aged 17 to 24.</p>\n<h2>Grace period</h2>\n<p>A customer who brings the account to a non-negative balance by <b>11:59 PM local time on the next business day</b> has overdraft fees for that day reversed automatically.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="HR-0887",
-        kb_id="kb-hr-policies",
-        title="Parental Leave — Guidance for Managers",
-        path="/hr/guidance/parental-leave-managers",
-        space="HR",
-        owner="dana.okafor@example.com",
-        labels=("guidance",),
-        updated_at=_days_ago(400),
-        # Contradicts HR-1041 on the headline number. Surfaced, never resolved
-        # silently (CNT-RET-20, CNT-CAT-06).
-        body_html=_page(
-            (
-                "Overview",
-                "<p>Primary caregivers receive <b>12 weeks</b> of paid parental "
-                "leave. Managers should plan cover accordingly.</p>",
-            ),
-            (
-                "Cover planning",
-                "<p>Agree a handover plan at least 8 weeks before the leave "
-                "begins and record it in the team plan.</p>",
-            ),
-        ),
+        doc_id='CB-GDE-0887',
+        kb_id='kb-consumer-policy',
+        title='Overdraft Fees — Branch Quick Reference',
+        path='/consumer/guidance/overdraft-quick-reference',
+        space='CONSUMER',
+        owner='branch.enablement@wellsfargo.example',
+        labels=('guidance',),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2025-06-18T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html="<html><body>\n<h2>Overdraft basics</h2>\n<p>An overdraft fee of <b>$15</b> is charged per item, with a maximum of <b>four</b> per day. Tellers should quote these figures when a customer asks at the counter.</p>\n<h2>Waivers</h2>\n<p>A one-time courtesy waiver may be offered once per rolling twelve months at the banker's discretion.</p>\n</body></html>",
     ),
     SeedDoc(
-        doc_id="HR-2210",
-        kb_id="kb-hr-policies",
-        title="Expenses and Reimbursement Policy",
-        path="/hr/policies/expenses",
-        space="HR",
-        owner="finance-ops@example.com",
-        labels=("policy", "finance", "approved"),
-        updated_at=_days_ago(120),
-        body_html=_page(
-            (
-                "Scope",
-                "<p>Applies to all business expenses incurred by employees and "
-                "contractors. Policy owner: Finance Operations.</p>",
-            ),
-            (
-                "Limits",
-                "<table><tr><th>Category</th><th>Limit</th><th>Approval</th></tr>"
-                "<tr><td>Meals (domestic)</td><td>45 per day</td><td>Line manager</td></tr>"
-                "<tr><td>Meals (international)</td><td>70 per day</td><td>Line manager</td></tr>"
-                "<tr><td>Air travel</td><td>Economy under 6 hours</td><td>Director</td></tr>"
-                "<tr><td>Accommodation</td><td>220 per night</td><td>Line manager</td></tr>"
-                "</table>",
-            ),
-            (
-                "Submission deadline",
-                "<p>Claims must be submitted within <b>60 days</b> of the "
-                "expense date. Claims outside this window require Director "
-                "approval and a written explanation.</p>",
-            ),
-        ),
+        doc_id='CB-POL-2210',
+        kb_id='kb-consumer-policy',
+        title='Regulation E Error Resolution Procedure',
+        path='/consumer/policies/reg-e-error-resolution',
+        space='CONSUMER',
+        owner='consumer.compliance@wellsfargo.example',
+        labels=('policy', 'approved', 'reg-e', 'disputes'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-05-18T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>Scope</h2>\n<p>Applies to every notice of error on a consumer account involving an electronic fund transfer, received by any channel. Policy owner: Consumer Compliance.</p>\n<h2>Investigation timeframes</h2>\n<table><tr><th>Condition</th><th>Investigate within</th><th>Provisional credit</th></tr><tr><td>Standard error notice</td><td>10 business days</td><td>Not required if resolved in 10</td></tr><tr><td>Extended investigation</td><td>45 calendar days</td><td>Required by day 10</td></tr><tr><td>New account (first 30 days)</td><td>20 business days</td><td>Required by day 20</td></tr><tr><td>Point-of-sale or foreign-initiated</td><td>90 calendar days</td><td>Required by day 10</td></tr></table>\n<h2>Customer notification</h2>\n<p>The customer must be told the result within <b>three business days</b> of completing the investigation. Where the claim is denied, the notice must state the reason and offer the supporting documents.</p>\n<h2>Notice deadline</h2>\n<p>A customer has <b>60 days</b> from the statement date on which the error first appeared to give notice.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="HR-0455",
-        kb_id="kb-hr-policies",
-        title="Expenses Policy (superseded 2024)",
-        path="/hr/archive/expenses-2024",
-        space="HR",
-        owner="finance-ops@example.com",
-        labels=("archive", "superseded"),
-        updated_at=_days_ago(1200),
-        body_html=_page(
-            ("Limits", "<p>Meals are limited to 30 per day. Claims must be "
-             "submitted within 30 days.</p>"),
-        ),
+        doc_id='CB-POL-0455',
+        kb_id='kb-consumer-policy',
+        title='Consumer Deposit Fee Schedule (superseded 2024)',
+        path='/consumer/archive/deposit-fee-schedule-2024',
+        space='CONSUMER',
+        owner='deposit.products@wellsfargo.example',
+        labels=('archive', 'superseded'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2023-04-30T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>Fees</h2>\n<p>Overdraft fee of $35 per item, up to five per day. Monthly service fee $12.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="HR-3001",
-        kb_id="kb-hr-policies",
-        title="Remote Working Standard",
-        path="/hr/policies/remote-working",
-        space="HR",
-        owner="dana.okafor@example.com",
-        labels=("policy", "approved"),
-        updated_at=None,  # no parseable date -> unknown_age (CNT-CAT-10)
-        version=None,     # no version field -> CNT-RET-11 fallback
-        body_html=_page(
-            ("Eligibility", "<p>All roles are eligible for hybrid working "
-             "unless the role requires on-site presence.</p>"),
-            ("Core hours", "<p>Core collaboration hours are 10:00 to 16:00 in "
-             "the employee's registered time zone.</p>"),
-        ),
-    ),
-
-    # ----------------------------------------------------------- Runbooks ---
-    SeedDoc(
-        doc_id="RB-114",
-        kb_id="kb-eng-runbooks",
-        title="Runbook: API rate limit exhaustion",
-        path="/eng/runbooks/api-rate-limits",
-        space="ENG",
-        owner="platform-oncall@example.com",
-        labels=("runbook", "oncall", "sev2"),
-        updated_at=_days_ago(20),
-        body_html=_page(
-            ("1. Detect", "<p>Alert <code>API_429_RATE</code> fires when the "
-             "429 ratio exceeds 2% over five minutes.</p>"),
-            ("2. Triage", "<p>Check the per-tenant limiter dashboard. Confirm "
-             "whether one tenant or all tenants are affected.</p>"),
-            ("3. Mitigate", "<p>Raise the tenant's burst allowance via "
-             "<code>ratectl raise --tenant &lt;id&gt; --burst 2x</code>. This "
-             "is reversible and requires no deploy.</p>"),
-            ("4. Escalate", "<p>If the limiter itself is unhealthy, page the "
-             "Platform on-call rotation.</p>"),
-        ),
+        doc_id='CB-POL-3001',
+        kb_id='kb-consumer-policy',
+        title='Funds Availability Standard (Regulation CC)',
+        path='/consumer/policies/funds-availability',
+        space='CONSUMER',
+        owner='deposit.operations@wellsfargo.example',
+        labels=('policy', 'approved', 'reg-cc'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        missing_from_store=False,
+        updated_at=None,
+        body_html="<html><body>\n<h2>Next-day availability</h2>\n<p>The first $275 of a day's check deposits is available on the next business day.</p>\n<h2>Exception holds</h2>\n<p>A hold may be extended where the account has been repeatedly overdrawn, the deposit exceeds $6,725 in one day, or there is reasonable cause to doubt collectability. The customer must be given a written notice stating which exception applies.</p>\n</body></html>",
     ),
     SeedDoc(
-        doc_id="RB-115",
-        kb_id="kb-eng-runbooks",
-        title="Runbook: Search index sync lag",
-        path="/eng/runbooks/index-sync-lag",
-        space="ENG",
-        owner="search-team@example.com",
-        labels=("runbook", "oncall"),
-        updated_at=_days_ago(8),
-        body_html=_page(
-            ("1. Detect", "<p>Sync lag above 30 minutes raises "
-             "<code>IDX_SYNC_LAG</code>.</p>"),
-            ("2. Diagnose", "<p>Inspect the connector's checkpoint. A stalled "
-             "checkpoint usually means a poison document.</p>"),
-            ("3. Mitigate", "<p>Skip the poison document with "
-             "<code>idxctl skip --doc &lt;id&gt;</code> and file a parse "
-             "defect.</p>"),
-        ),
+        doc_id='OPS-RB-114',
+        kb_id='kb-ops-runbooks',
+        title='Runbook: Fedwire cut-off breach',
+        path='/ops/runbooks/fedwire-cutoff-breach',
+        space='OPS',
+        owner='payments.oncall@wellsfargo.example',
+        labels=('runbook', 'oncall', 'sev2', 'payments'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-08-05T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html="<html><body>\n<h2>1. Detect</h2>\n<p>Alert <code>WIRE_CUTOFF_RISK</code> fires when the outbound Fedwire queue still holds value-dated items 15 minutes before the <b>5:00 PM ET</b> customer cut-off.</p>\n<h2>2. Triage</h2>\n<p>Check the queue by originating line of business. Confirm whether the backlog is one large corporate batch or a broad slowdown across channels.</p>\n<h2>3. Mitigate</h2>\n<p>Release held items with <code>wirectl release --queue outbound --priority value-dated</code>. This is reversible and requires no deployment. Items that cannot clear before the Fed's <b>6:00 PM ET</b> closing are value-dated to the next business day.</p>\n<h2>4. Escalate</h2>\n<p>If the Fedwire interface itself is unhealthy, page Payments Engineering on-call and notify the Treasury Services duty manager. A missed cut-off is reportable to Operational Risk within one business day.</p>\n</body></html>",
     ),
     SeedDoc(
-        doc_id="RB-090",
-        kb_id="kb-eng-runbooks",
-        title="Decision: adopt reciprocal rank fusion for multi-channel search",
-        path="/eng/decisions/adr-0090-rrf",
-        space="ENG",
-        owner="search-team@example.com",
-        labels=("adr", "decision"),
-        updated_at=_days_ago(210),
-        body_html=_page(
-            ("Status", "<p>Status: Accepted</p>"),
-            ("Context", "<p>Context: Vector and keyword channels return scores "
-             "on incomparable scales. Merging them numerically produced an "
-             "ordering that looked principled and was arbitrary.</p>"),
-            ("Decision", "<p>Decision: fuse by rank using reciprocal rank "
-             "fusion, and delegate cross-channel comparison to a cross-encoder "
-             "reranker that reads the text.</p>"),
-            ("Consequences", "<p>Consequences: the reranker becomes a required "
-             "stage rather than an optimisation.</p>"),
-        ),
+        doc_id='OPS-RB-115',
+        kb_id='kb-ops-runbooks',
+        title='Runbook: Core deposit posting lag',
+        path='/ops/runbooks/core-posting-lag',
+        space='OPS',
+        owner='deposit.oncall@wellsfargo.example',
+        labels=('runbook', 'oncall'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-08-13T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>1. Detect</h2>\n<p>Posting lag above 30 minutes raises <code>CORE_POST_LAG</code>. Balances shown in digital channels are stale for the duration.</p>\n<h2>2. Diagnose</h2>\n<p>Inspect the posting checkpoint. A stalled checkpoint is usually one poison item — most often a memo post with a malformed effective date.</p>\n<h2>3. Mitigate</h2>\n<p>Skip the item with <code>postctl skip --item &lt;id&gt;</code>, then file a break with Deposit Operations the same day. Do not skip more than three items without escalating.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="RB-201",
-        kb_id="kb-eng-runbooks",
-        title="Deprecated: legacy queue runbook",
-        path="/eng/archive/legacy-queue",
-        space="ENG",
-        owner="platform-oncall@example.com",
-        labels=("archive",),
-        updated_at=_days_ago(1400),
-        body_html=_page(("Note", "<p>This system was decommissioned.</p>")),
+        doc_id='OPS-ADR-090',
+        kb_id='kb-ops-runbooks',
+        title='Decision: single source for wire cut-off times',
+        path='/ops/decisions/adr-0090-cutoff-source',
+        space='OPS',
+        owner='payments.architecture@wellsfargo.example',
+        labels=('adr', 'decision'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2025-12-25T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>Status</h2>\n<p>Status: Accepted</p>\n<h2>Context</h2>\n<p>Context: cut-off times were published in four places — the public site, the treasury portal, the branch handbook and the payments service configuration — and they disagreed by up to an hour during daylight-saving transitions.</p>\n<h2>Decision</h2>\n<p>Decision: the payments service configuration is the system of record. Every other surface renders it, and none restates it.</p>\n<h2>Consequences</h2>\n<p>Consequences: a cut-off change is a configuration change with an audit trail, not a documentation change. Surfaces that cannot render live configuration must link rather than copy.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="RB-777",
-        kb_id="kb-eng-runbooks",
-        title="Runbook: certificate rotation",
-        path="/eng/runbooks/cert-rotation",
-        space="ENG",
-        owner="security-eng@example.com",
-        labels=("runbook",),
-        updated_at=_days_ago(60),
-        # Indexed by PGP, since deleted at the source. Exercises `stale_index`
-        # (CNT-RET-06), the most common production surprise.
+        doc_id='OPS-RB-201',
+        kb_id='kb-ops-runbooks',
+        title='Deprecated: legacy ACH exception queue',
+        path='/ops/archive/legacy-ach-queue',
+        space='OPS',
+        owner='payments.oncall@wellsfargo.example',
+        labels=('archive',),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2022-10-22T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>Note</h2>\n<p>This queue was decommissioned when ACH exceptions moved to the unified breaks platform.</p>\n</body></html>',
+    ),
+    SeedDoc(
+        doc_id='OPS-RB-777',
+        kb_id='kb-ops-runbooks',
+        title='Runbook: HSM key ceremony',
+        path='/ops/runbooks/hsm-key-ceremony',
+        space='OPS',
+        owner='security.engineering@wellsfargo.example',
+        labels=('runbook', 'security'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-06-11T12:00:00+00:00'),
         missing_from_store=True,
-        body_html=_page(("Steps", "<p>Rotate the intermediate certificate.</p>")),
-    ),
-
-    # ------------------------------------------------------------ Finance ---
-    SeedDoc(
-        doc_id="FIN-3300",
-        kb_id="kb-fin-controls",
-        title="Revenue Recognition Control Narrative",
-        path="/finance/controls/rev-rec",
-        space="FIN",
-        owner="controller@example.com",
-        labels=("control", "sox"),
-        sensitivity="confidential",
-        acl_principals=("group:finance", "group:audit"),
-        updated_at=_days_ago(90),
-        forbidden_for=("user:asha", "group:all-staff"),
-        body_html=_page(
-            ("Control objective", "<p>Revenue is recognised in the period in "
-             "which the performance obligation is satisfied.</p>"),
-            ("Key controls", "<p>Monthly reconciliation performed by the "
-             "Controller and reviewed by the CFO.</p>"),
-        ),
+        body_html='<html><body>\n<h2>Steps</h2>\n<p>Rotate the payment HSM master key under dual control.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="FIN-3301",
-        kb_id="kb-fin-controls",
-        title="Refund Policy",
-        path="/finance/policies/refunds",
-        space="FIN",
-        owner="controller@example.com",
-        labels=("policy", "approved", "customer-facing"),
-        updated_at=_days_ago(30),
-        body_html=_page(
-            ("Eligibility", "<p>Customers may request a full refund within "
-             "<b>30 days</b> of purchase. Annual plans are refundable pro rata "
-             "after 30 days.</p>"),
-            ("Exclusions", "<p>Usage-based charges already incurred are not "
-             "refundable. Professional services are non-refundable once "
-             "delivery has begun.</p>"),
-            ("Processing", "<p>Approved refunds are processed within 10 "
-             "business days to the original payment method.</p>"),
-        ),
-    ),
-
-    # --------------------------------------------------------------- Legal --
-    SeedDoc(
-        doc_id="LGL-9001",
-        kb_id="kb-legal-holds",
-        title="Litigation Hold — Matter 2026-114",
-        path="/legal/holds/2026-114",
-        space="LEGAL",
-        owner="general-counsel@example.com",
-        labels=("legal-hold", "restricted"),
-        sensitivity="restricted",
-        acl_principals=("group:legal",),
-        updated_at=_days_ago(15),
-        forbidden_for=("group:all-staff", "user:asha", "user:rob"),
-        body_html=_page(("Instruction", "<p>Preserve all documents relating to "
-                         "matter 2026-114.</p>")),
-    ),
-
-    # ------------------------------------------------------------ Web/dupes -
-    SeedDoc(
-        doc_id="WEB-500",
-        kb_id="kb-marketing-web",
-        title="Refund Policy",
-        path="/www/legal/refund-policy",
-        space="WEB",
-        owner="marketing@example.com",
-        labels=("public", "customer-facing"),
-        sensitivity="public",
-        updated_at=_days_ago(200),
-        # Near-duplicate of FIN-3301 and *staler*. Without cross-source dedup
-        # the answer cites this one and diverges from the system of record
-        # (CNT-PAR-21).
-        canonical_of="FIN-3301",
-        body_html=_page(
-            ("Refunds", "<p>Customers may request a full refund within 30 days "
-             "of purchase. Annual plans are refundable pro rata after 30 "
-             "days.</p>"),
-        ),
+        doc_id='RSK-CTL-3300',
+        kb_id='kb-risk-controls',
+        title='BSA/AML Transaction Monitoring Control Narrative',
+        path='/risk/controls/bsa-aml-transaction-monitoring',
+        space='RISK',
+        owner='bsa.officer@wellsfargo.example',
+        labels=('control', 'bsa-aml', 'sox'),
+        sensitivity='confidential',
+        acl_principals=('group:financial-crimes', 'group:audit'),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-05-26T12:00:00+00:00'),
+        missing_from_store=False,
+        forbidden_for=('user:asha', 'group:all-staff', 'group:consumer-banking'),
+        body_html='<html><body>\n<h2>Control objective</h2>\n<p>Transactions are monitored for patterns indicative of money laundering, and alerts are dispositioned within the required timeframe.</p>\n<h2>Alert thresholds</h2>\n<p>Structuring detection triggers on aggregate cash activity between $8,000 and $10,000 across a rolling five-business-day window. Thresholds are model-owned and are not published outside Financial Crimes.</p>\n<h2>Key controls</h2>\n<p>Level 1 review within 30 calendar days of alert generation; Level 2 escalation within 10 further days; SAR filing decision within 30 days of the determination date.</p>\n</body></html>',
     ),
     SeedDoc(
-        doc_id="WEB-501",
-        kb_id="kb-marketing-web",
-        title="Security and Compliance Overview",
-        path="/www/trust/security",
-        space="WEB",
-        owner="marketing@example.com",
-        labels=("public",),
-        sensitivity="public",
-        updated_at=_days_ago(75),
-        # The index's copy of the title is stale — exercises CNT-RET-08.
-        index_title_override="Security Overview (draft)",
-        body_html=_page(
-            ("Certifications", "<p>We maintain SOC 2 Type II and ISO 27001 "
-             "certification, audited annually.</p>"),
-            ("Data residency", "<p>Customer data is stored in the region "
-             "selected at provisioning and is not replicated across "
-             "regions.</p>"),
-            ("Frequently asked", "<p>Where is my data stored?</p>"),
-        ),
+        doc_id='RSK-POL-3301',
+        kb_id='kb-risk-controls',
+        title='Wire Transfer Cut-off and Recall Policy',
+        path='/risk/policies/wire-cutoff-and-recall',
+        space='RISK',
+        owner='treasury.services@wellsfargo.example',
+        labels=('policy', 'approved', 'customer-facing', 'payments'),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-07-27T12:00:00+00:00'),
+        missing_from_store=False,
+        body_html='<html><body>\n<h2>Cut-off times</h2>\n<p>Domestic wire requests received through online banking are executed the same business day when submitted before <b>5:00 PM ET</b>. International wire requests must be submitted before <b>3:00 PM ET</b>. Requests received after the applicable cut-off are executed on the next business day.</p><table><tr><th>Wire type</th><th>Channel</th><th>Cut-off (ET)</th></tr><tr><td>Domestic</td><td>Online / mobile</td><td>5:00 PM</td></tr><tr><td>Domestic</td><td>Branch</td><td>4:00 PM</td></tr><tr><td>International</td><td>Online / mobile</td><td>3:00 PM</td></tr><tr><td>International</td><td>Branch</td><td>2:00 PM</td></tr></table>\n<h2>Recall</h2>\n<p>A sent wire cannot be cancelled unilaterally. A recall request may be submitted, and the receiving institution is not obliged to return the funds. Recall requests are submitted within <b>one business day</b> where possible.</p>\n<h2>Fees</h2>\n<p>Outgoing domestic wire $30, outgoing international $45, incoming $15. Fees are waived on Premier relationships.</p>\n</body></html>',
+    ),
+    SeedDoc(
+        doc_id='RSK-CTL-3310',
+        kb_id='kb-risk-controls',
+        title='Model Risk Management Standard (SR 11-7)',
+        path='/risk/controls/model-risk-management',
+        space='RISK',
+        owner='model.risk@wellsfargo.example',
+        labels=('control', 'approved', 'sox'),
+        sensitivity='confidential',
+        acl_principals=('group:model-risk', 'group:audit'),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-04-04T12:00:00+00:00'),
+        missing_from_store=False,
+        forbidden_for=('group:all-staff', 'user:asha'),
+        body_html='<html><body>\n<h2>Scope</h2>\n<p>Applies to every quantitative method whose output informs a business decision, including vendor models.</p>\n<h2>Validation cadence</h2>\n<p>High-materiality models are validated annually; medium every two years; low every three. A material change triggers validation regardless of cadence.</p>\n</body></html>',
+    ),
+    SeedDoc(
+        doc_id='LGL-HLD-9001',
+        kb_id='kb-legal-holds',
+        title='Litigation Hold — Matter 2026-114',
+        path='/legal/holds/2026-114',
+        space='LEGAL',
+        owner='general.counsel@wellsfargo.example',
+        labels=('legal-hold', 'restricted'),
+        sensitivity='restricted',
+        acl_principals=('group:legal',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-08-10T12:00:00+00:00'),
+        missing_from_store=False,
+        forbidden_for=('group:all-staff', 'user:asha', 'user:rob'),
+        body_html='<html><body>\n<h2>Instruction</h2>\n<p>Preserve all documents relating to matter 2026-114. Do not delete, alter or archive.</p>\n</body></html>',
+    ),
+    SeedDoc(
+        doc_id='WEB-500',
+        kb_id='kb-public-web',
+        title='Wire Transfers — Fees and Cut-off Times',
+        path='/www/help/wire-transfers',
+        space='WEB',
+        owner='digital.content@wellsfargo.example',
+        labels=('published', 'customer-facing'),
+        sensitivity='public',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-01-19T12:00:00+00:00'),
+        missing_from_store=False,
+        canonical_of='RSK-POL-3301',
+        body_html='<html><body>\n<h2>Cut-off times</h2>\n<p>Domestic wires submitted online before 5:00 PM ET are sent the same business day. International wires must be submitted before 3:00 PM ET.</p>\n<h2>Fees</h2>\n<p>Outgoing domestic wire $30. Outgoing international $45. Incoming wire $15.</p>\n</body></html>',
+    ),
+    SeedDoc(
+        doc_id='WEB-501',
+        kb_id='kb-public-web',
+        title='Security and Fraud Protection',
+        path='/www/privacy-security/fraud-protection',
+        space='WEB',
+        owner='digital.content@wellsfargo.example',
+        labels=('published',),
+        sensitivity='public',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2026-06-19T12:00:00+00:00'),
+        missing_from_store=False,
+        index_title_override='Fraud Protection (draft)',
+        body_html='<html><body>\n<h2>Zero liability</h2>\n<p>Customers are not held responsible for unauthorised card transactions reported promptly.</p>\n<h2>Reporting a suspected fraud</h2>\n<p>Report suspected fraud immediately through the mobile app, online banking, or by calling the number on the back of the card.</p>\n<h2>Frequently asked</h2>\n<p>How quickly must I report an unauthorised transaction?</p>\n</body></html>',
+    ),
+    SeedDoc(
+        doc_id='CB-GONE-00',
+        kb_id='kb-consumer-policy',
+        title='Withdrawn disclosure bulletin 0',
+        path='/consumer/withdrawn/0',
+        space='CONSUMER',
+        owner='consumer.compliance@wellsfargo.example',
+        labels=('guidance',),
+        sensitivity='internal',
+        acl_principals=('group:all-staff',),
+        version='1',
+        updated_at=dt.datetime.fromisoformat('2025-04-09T12:00:00+00:00'),
+        missing_from_store=True,
+        body_html='<html><body><p>Withdrawn and replaced.</p></body></html>',
     ),
 ]
 
@@ -394,69 +344,6 @@ SEED_BY_ID: dict[str, SeedDoc] = {d.doc_id: d for d in SEED}
 # does (CNT-MAP-01), and it is data.
 # ---------------------------------------------------------------------------
 
-KB_FIELD_VOCABULARY: dict[str, dict[str, str]] = {
-    "kb-hr-policies": {
-        "doc_id": "documentNumber",
-        "title": "docTitle",
-        "url": "portalUrl",
-        "updated_at": "lastModified",     # ISO-8601 string
-        "space": "spaceKey",
-        "owner": "ownerEmail",
-        "labels": "tags",                 # comma-separated string
-        "sensitivity": "classification",
-        "acl_principals": "readGroups",
-    },
-    "kb-eng-runbooks": {
-        "doc_id": "id",
-        "title": "name",
-        "url": "link",
-        "updated_at": "updated",          # epoch seconds
-        "space": "team",
-        "owner": "maintainer",
-        "labels": "topics",               # list
-        "sensitivity": "level",
-        "acl_principals": "acl",
-    },
-    "kb-fin-controls": {
-        "doc_id": "controlDocId",
-        "title": "heading",
-        "url": "href",
-        "updated_at": "revisedOn",        # DD/MM/YYYY
-        "space": "domain",
-        "owner": "accountableParty",
-        "labels": "keywords",
-        "sensitivity": "infoClass",
-        "acl_principals": "entitlements",
-    },
-    "kb-legal-holds": {
-        "doc_id": "matterDocId",
-        "title": "subject",
-        "url": "uri",
-        "updated_at": "issuedOn",
-        "space": "practiceArea",
-        "owner": "custodian",
-        "labels": "flags",
-        "sensitivity": "handling",
-        "acl_principals": "permittedGroups",
-    },
-    "kb-marketing-web": {
-        "doc_id": "pageId",
-        "title": "pageTitle",
-        "url": "canonicalUrl",
-        "updated_at": "publishedAt",
-        "space": "site",
-        "owner": "contentOwner",
-        "labels": "categories",
-        # Deliberately absent: this knowledgebase exposes no ACL fields at all,
-        # which forces the explicit access-class declaration of CNT-ACL-03.
-    },
-}
+KB_FIELD_VOCABULARY: dict[str, dict[str, str]] = {'kb-consumer-policy': {'acl_principals': 'readGroups', 'doc_id': 'documentNumber', 'labels': 'tags', 'owner': 'ownerEmail', 'sensitivity': 'classification', 'space': 'spaceKey', 'title': 'docTitle', 'updated_at': 'lastModified', 'url': 'portalUrl'}, 'kb-ops-runbooks': {'acl_principals': 'acl', 'doc_id': 'id', 'labels': 'topics', 'owner': 'maintainer', 'sensitivity': 'level', 'space': 'team', 'title': 'name', 'updated_at': 'updated', 'url': 'link'}, 'kb-risk-controls': {'acl_principals': 'entitlements', 'doc_id': 'controlDocId', 'labels': 'keywords', 'owner': 'accountableParty', 'sensitivity': 'infoClass', 'space': 'domain', 'title': 'heading', 'updated_at': 'revisedOn', 'url': 'href'}, 'kb-legal-holds': {'acl_principals': 'permittedGroups', 'doc_id': 'matterDocId', 'labels': 'flags', 'owner': 'custodian', 'sensitivity': 'handling', 'space': 'practiceArea', 'title': 'subject', 'updated_at': 'issuedOn', 'url': 'uri'}, 'kb-poa': {'acl_principals': 'readGroups', 'doc_id': 'docRef', 'labels': 'tags', 'owner': 'documentOwner', 'sensitivity': 'handling', 'space': 'practiceGroup', 'title': 'docTitle', 'updated_at': 'lastReviewed', 'url': 'location'}, 'kb-public-web': {'doc_id': 'pageId', 'labels': 'categories', 'owner': 'contentOwner', 'space': 'site', 'title': 'pageTitle', 'updated_at': 'publishedAt', 'url': 'canonicalUrl'}}
 
-KB_DESCRIPTIONS: dict[str, tuple[str, str, bool]] = {
-    # kb_id: (display name, description, exposes_acl)
-    "kb-hr-policies": ("HR Policies", "People Operations policy library", True),
-    "kb-eng-runbooks": ("Engineering Runbooks", "On-call runbooks and decision records", True),
-    "kb-fin-controls": ("Finance Controls", "SOX control narratives and finance policy", True),
-    "kb-legal-holds": ("Legal Holds", "Litigation holds and matter instructions", True),
-    "kb-marketing-web": ("Public Web", "Published marketing and trust pages", False),
-}
+KB_DESCRIPTIONS: dict[str, tuple[str, str, bool]] = {'kb-consumer-policy': ('Consumer Banking Policy', 'Deposit, lending and disclosure policy', True), 'kb-ops-runbooks': ('Operations Runbooks', 'Payments and deposit on-call runbooks and decisions', True), 'kb-risk-controls': ('Risk and Controls', 'BSA/AML, SOX and model-risk control narratives', True), 'kb-legal-holds': ('Legal Holds', 'Litigation holds and matter instructions', True), 'kb-poa': ('Power of Attorney', 'Per-state statutory summaries and the internal acceptance procedure', True), 'kb-public-web': ('Public Web', 'Published customer-facing help and disclosure pages', False)}

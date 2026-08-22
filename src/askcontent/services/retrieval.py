@@ -536,6 +536,13 @@ def _fingerprint(text: str) -> str:
 
 
 _CLAIM = __import__("re").compile(r"\b(\d+(?:\.\d+)?)\s+([a-z%][a-z]{1,14})\b", __import__("re").I)
+
+#: Money, which the number-plus-unit pattern misses entirely: "$35 is assessed"
+#: parses as the quantity 35 with the unit "is", and "is" is a stop word. In a
+#: bank most quantified claims are amounts, so without this the conflict
+#: surface is blind to the disagreements that matter most — a fee schedule
+#: saying $35 and a branch card saying $15 produced no conflict at all.
+_MONEY = __import__("re").compile(r"[$\u00a3\u20ac]\s?(\d[\d,]*(?:\.\d+)?)")
 _CLAIM_STOP = frozenset(
     "the a an of to and or in on for with by from at as is are was were be per "
     "and following within least most more than about over under".split()
@@ -599,6 +606,13 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
     for citation in citations:
         text = citation.span
         tokens = _significant(text)
+        for match in _MONEY.finditer(text):
+            value = match.group(1).replace(",", "")
+            window = _significant(
+                text[max(0, match.start() - 120) : match.end() + 120]
+            ) or tokens
+            claims.append((citation, value, "currency", window))
+
         for match in _CLAIM.finditer(text):
             value, unit = match.group(1), match.group(2).lower()
             if unit in _CLAIM_STOP or unit in _DATE_UNITS:

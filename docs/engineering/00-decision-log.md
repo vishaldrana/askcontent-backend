@@ -247,3 +247,53 @@ The residual 8.4 s on a cold cache is one body fetch per candidate document.
 That is the cost the cache exists to pay once, and it is also the argument for
 the batch-fetch endpoint listed as an open question — the same argument as for
 batch authorization, with the same shape.
+
+---
+
+## 2026-08-22 · What the Power of Attorney corpus taught
+
+The POA knowledgebase was added as a demonstration and immediately behaved like
+a real corpus, which is the point of building fixtures that look like the work.
+
+### Jurisdictional documents legitimately disagree
+
+The first run flagged the Texas summary (10 business days) against the Florida
+summary (4 business days) as a contradiction. Both are correct. A conflict
+surface that reports federalism as an error trains people to ignore it, and a
+banner nobody reads is worse than no banner.
+
+Conflict detection now reads scope labels — `state-*`, `region-*`,
+`jurisdiction-*` — and the rule is deliberately **asymmetric**: two documents
+that both declare a scope and declare different ones are parallel; a document
+that declares none applies everywhere and can still contradict any of them.
+
+That asymmetry is what preserves the finding worth having. The internal
+acceptance procedure states the statutory window as 20 business days; every
+jurisdictional summary says 10, or 4 in Florida. The procedure declares no
+jurisdiction, so it is wrong in all five — and the conflict now fires against
+each state rather than being suppressed as "a different scope".
+
+### Money is a quantified claim and the detector could not see it
+
+`$35` versus `$15` produced no conflict at all. The claim pattern was
+`number + unit-word`, so "$35 is assessed" parsed as the quantity 35 with the
+unit "is", and "is" is a stop word.
+
+In a bank most quantified claims are amounts. Without a currency pattern the
+conflict surface was blind to exactly the disagreements that reach a customer —
+a fee schedule saying $35 and a branch quick-reference card saying $15.
+
+### PDFs have no paragraphs
+
+`pypdfium2` returns a text layer as lines, not blocks. Splitting on a blank line
+yielded one paragraph per page, so every chunk from a PDF carried an empty
+heading path — and `CNT-CHK-02` makes that path load-bearing.
+
+Headings are now recovered heuristically: a numbered clause, an all-caps short
+line, or a short title-case line followed by prose. It is labelled as a
+heuristic at the call site. Docling's layout model replaces it and does the job
+with font size and position; rung 1 exists for speed on clean digital PDFs, and
+this is the cost of that speed. The recorded `parse_path` says which ran.
+
+Measured on the California summary: 1 block before, 22 after, 9 chunks with
+real heading paths.
