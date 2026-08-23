@@ -828,6 +828,45 @@ def scope_facets(slug: str) -> dict:
     }
 
 
+@router.get("/api/connectors/{slug}/starters")
+def chat_starters(slug: str) -> dict:
+    """Suggestions for an empty chat, drawn from the corpus itself.
+
+    Public in the sense that the widget needs it too: an embedded bot's first
+    screen has the same problem as the console's, and a suggestion list that
+    only administrators can see solves it for the wrong audience.
+
+    Scope-respecting, because it reads the same population every other screen
+    reads. A chip that offers a document the reader cannot open is a chip that
+    produces a refusal, and the refusal reads as the product being broken.
+    """
+    from ..domain.starters import choose
+    from ..services.retrieval import scope_population
+
+    platform = _platform()
+    connector = platform.registry.get(slug)
+
+    # How much each page actually says, as chunks. A crawled corpus reports no
+    # size, so without this every document ties and the chips are simply the
+    # first six titles in the alphabet — which is how "Analysis" ends up being
+    # offered ahead of "Getting Started".
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        weights = {
+            r["doc_id"]: r["chunks"]
+            for r in session.execute(text(f"""
+                SELECT d.doc_id AS doc_id, count(*) AS chunks
+                  FROM {S}.document_chunk c
+                  JOIN {S}.document d ON d.id = c.document_id
+                 WHERE c.connector_id = :c
+                 GROUP BY d.doc_id
+            """), {"c": cid}).mappings().all()
+        }
+
+    starters = choose(scope_population(platform.index, connector), weights=weights)
+    return {"starters": [s.model_dump(mode="json") for s in starters]}
+
+
 @router.get("/api/connectors/{slug}/roles/{role_id}/effective")
 def effective_access(slug: str, role_id: str) -> dict:
     """What this role can actually reach, computed rather than asserted.
