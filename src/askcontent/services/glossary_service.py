@@ -49,12 +49,39 @@ class GlossaryService:
                 ), {"c": connector_id}).all()
             }
 
-            added = 0
+            added = refreshed = 0
             for proposal in proposals:
                 if proposal.term.upper() in existing:
-                    # Never overwrite a term a person has already ruled on —
-                    # including one they rejected, or the rejection would be
-                    # undone on every discovery run.
+                    # Refresh what was *measured*; never touch what was
+                    # *judged*.
+                    #
+                    # Skipping known terms entirely — which is what this did —
+                    # freezes their counts at whatever the corpus looked like
+                    # the first time. Three terms here still claimed forty
+                    # documents from a period when every page carried the
+                    # navigation menu, long after that was stripped, and the
+                    # evidence quoted the menu. A reviewer cannot judge a
+                    # proposal on numbers that describe a corpus that no longer
+                    # exists.
+                    #
+                    # Status, definition, aliases and the reviewer's name are
+                    # untouched, so a confirmation or a rejection survives
+                    # every future run. That is the part that must never be
+                    # undone; the counts are just observations.
+                    session.execute(text(f"""
+                        UPDATE {S}.glossary_term SET
+                            method = :method, confidence = :confidence,
+                            occurrences = :occurrences, documents = :documents,
+                            evidence = :evidence, updated_at = now()
+                        WHERE connector_id = :c AND upper(term) = upper(:term)
+                    """), {
+                        "c": connector_id, "term": proposal.term,
+                        "method": proposal.method, "confidence": proposal.confidence,
+                        "occurrences": proposal.occurrences,
+                        "documents": proposal.documents,
+                        "evidence": list(proposal.evidence),
+                    })
+                    refreshed += 1
                     continue
                 session.execute(text(f"""
                     INSERT INTO {S}.glossary_term (
@@ -74,10 +101,51 @@ class GlossaryService:
                 })
                 added += 1
 
+            # Then measure every term directly, rather than inferring
+            # anything from this pass.
+            #
+            # `limit` bounds discovery, so a term missing from `proposals` may
+            # have fallen below the cut rather than left the corpus — and
+            # guessing either way is wrong. SMTP sat at "40 documents" from a
+            # period when every page carried the navigation menu; it is in one.
+            # A stale count and an inferred zero are both fact-shaped lies, and
+            # the fact is one query away.
+            measured = session.execute(text(f"""
+                UPDATE {S}.glossary_term g SET
+                    documents = m.documents,
+                    occurrences = m.occurrences,
+                    updated_at = now()
+                FROM (
+                    SELECT t.id,
+                           count(DISTINCT d.doc_id) AS documents,
+                           coalesce(sum(
+                               (length(c.text) - length(
+                                   regexp_replace(lower(c.text), lower(t.term), '', 'g')
+                               )) / greatest(length(t.term), 1)
+                           ), 0) AS occurrences
+                    FROM {S}.glossary_term t
+                    LEFT JOIN {S}.document_chunk c
+                           ON c.connector_id = t.connector_id
+                          AND NOT c.is_code
+                          -- Whole word. Without the boundaries "API" matches
+                          -- "rapid" and every count is fiction.
+                          AND c.text ~* ('\y' || t.term || '\y')
+                    LEFT JOIN {S}.document d ON d.id = c.document_id
+                    WHERE t.connector_id = :c
+                    GROUP BY t.id
+                ) m
+                WHERE g.id = m.id
+            """), {"c": connector_id}).rowcount
+
             session.commit()
             return {
                 "documents_scanned": len(rows),
                 "proposed": added,
-                "already_known": len(proposals) - added,
-                "summary": f"{added} new terms proposed from {len(rows)} documents",
+                "refreshed": refreshed,
+                "measured": measured,
+                "already_known": refreshed,
+                "summary": (
+                    f"{added} new, {measured} terms measured "
+                    f"against {len(rows)} documents"
+                ),
             }
