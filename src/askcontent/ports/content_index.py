@@ -40,6 +40,21 @@ class KnowledgeBaseDescriptor(BaseModel):
     # Absence forces the explicit access-class declaration of CNT-ACL-03.
     exposes_acl: bool = False
 
+    #: Whether the index can rerank its own fragments — a cross-encoder inside
+    #: the search service, asked for with a parameter on the query rather than
+    #: run by us afterwards.
+    #:
+    #: This is a *capability*, declared, not assumed. It has to be, because the
+    #: two topologies cannot both be right at once: if the index reranks and we
+    #: rerank again, the second pass reorders on a scale it does not own, using
+    #: passages we recovered ourselves rather than the fragments the index
+    #: actually scored. That is the same class of mistake as merging two
+    #: rankers' scores, and it is invisible — the answer still looks fine.
+    supports_rerank: bool = False
+    #: What model does it, when it does. Recorded so an eval run says which
+    #: ranker produced its numbers, whoever ran it.
+    reranker_id: str = ""
+
 
 class IndexHit(BaseModel):
     doc_id: str
@@ -59,6 +74,13 @@ class IndexPage(BaseModel):
     hits: tuple[IndexHit, ...]
     cursor: str | None = None
     total_estimate: int | None = None
+
+    #: Set by the index when it reranked these hits itself. Reported rather
+    #: than inferred from the request: a service under load may ignore the
+    #: flag, and a caller that assumed otherwise would skip its own reranking
+    #: and quietly serve fusion order as though it had been ranked.
+    reranked: bool = False
+    reranker_id: str = ""
 
 
 class IndexFilters(BaseModel):
@@ -92,7 +114,21 @@ class ContentIndex(Protocol):
         filters: IndexFilters,
         k: int = 20,
         cursor: str | None = None,
-    ) -> IndexPage: ...
+        rerank: bool = False,
+    ) -> IndexPage:
+        """Fragments matching the query.
+
+        `rerank` asks the index to order its own results with a cross-encoder
+        before returning them. Passing it to an index that does not advertise
+        `supports_rerank` is allowed and ignored — a caller should not have to
+        branch on the capability, and silently *not* reranking is safe in a way
+        that silently double-reranking is not.
+
+        When the index does rerank, it says so on the page. Guessing from the
+        request would be wrong the first time a search service starts ignoring
+        the flag under load.
+        """
+        ...
 
     def resolve_urls(
         self, urls: list[str], kb_ids: tuple[str, ...] = ()

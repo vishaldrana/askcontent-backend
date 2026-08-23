@@ -61,3 +61,17 @@ def test_an_unknown_expectation_fails_loudly():
     """Silently passing an assertion nobody implemented is how a suite becomes
     decorative."""
     assert check([Expectation("vibes", "good")], answered())
+
+
+def test_cites_first_sees_a_ranking_regression_that_cites_alone_misses():
+    """The failure mode this exists for: a reranker change keeps the right
+    document in the evidence and pushes it down. `cites` still passes, the
+    answer still reads plausibly, and the ranking has quietly got worse."""
+    outcome = answered(cited=("Zapier", "Introduction"))
+    assert not check([Expectation("cites", "Introduction")], outcome)
+    failures = check([Expectation("cites_first", "Introduction")], outcome)
+    assert failures and "Zapier" in failures[0]
+
+
+def test_cites_first_on_a_refusal_says_so_plainly():
+    assert check([Expectation("cites_first", "Anything")], refused())

@@ -230,7 +230,11 @@ class MockPgpIndex:
         filters: IndexFilters,
         k: int = 20,
         cursor: str | None = None,
+        rerank: bool = False,
     ) -> IndexPage:
+        # Accepted and ignored. The offline mock advertises no reranking
+        # capability, and a caller must not have to branch on that — silently
+        # not reranking is safe, in the way silently double-reranking is not.
         self._simulate_call(kb_id, query)
 
         query_vec = self._embedder.embed_query(query)

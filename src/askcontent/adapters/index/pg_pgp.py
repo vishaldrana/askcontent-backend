@@ -26,9 +26,12 @@ before this file is rewritten against the real service.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import json
 
 from sqlalchemy import text
+
+logger = logging.getLogger("askcontent.pgp")
 
 from ...ports.content_index import (
     FieldSample,
@@ -52,9 +55,15 @@ _KB_NAMES = {
 
 
 class PgPgpIndex:
-    def __init__(self, engine, embedder) -> None:
+    def __init__(self, engine, embedder, reranker=None) -> None:
         self._engine = engine
         self._embedder = embedder
+        #: The cross-encoder this "search service" runs when a caller asks for
+        #: reranking. In the real PGP this is inside the service and we never
+        #: see it — we pass a flag and receive ordered fragments. Holding one
+        #: here is what makes the stub behave like the thing it stands in for,
+        #: including the part where the *index* decides the order.
+        self._reranker = reranker
 
     # -- capability listing ------------------------------------------------
 
@@ -110,6 +119,8 @@ class PgPgpIndex:
             embedding_model=getattr(self._embedder, "model_id", "unknown"),
             embedding_dimension=getattr(self._embedder, "dimension", 0),
             exposes_acl=exposes_acl,
+            supports_rerank=self._reranker is not None,
+            reranker_id=getattr(self._reranker, "reranker_id", "") if self._reranker else "",
             fields=self._field_samples(connection, kb_id, count),
         )
 
@@ -156,6 +167,7 @@ class PgPgpIndex:
         filters: IndexFilters,
         k: int = 20,
         cursor: str | None = None,
+        rerank: bool = False,
     ) -> IndexPage:
         vector = self._embedder.embed_query(query)
         literal = "[" + ",".join(f"{v:.6f}" for v in vector) + "]"
@@ -206,7 +218,7 @@ class PgPgpIndex:
         # No join at all. The index is a separate system; reaching into the
         # store from here is the mistake this whole file exists to avoid.
         sql = f"""
-            SELECT e.doc_id, e.raw_metadata, e.facets,
+            SELECT e.doc_id, e.raw_metadata, e.facets, e.fragment,
                    1 - (e.embedding <=> CAST(:q AS vector)) AS score
             FROM ecm_stub.pgp_index_entry e
             WHERE {' AND '.join(clauses)}
@@ -225,13 +237,58 @@ class PgPgpIndex:
                 doc_id=row.doc_id,
                 kb_id=kb_id,
                 score=float(row.score),
+                # Advisory. The index's own extract, which may lag the store
+                # and is never cited — the passage a reader sees is recovered
+                # from the system of record.
+                passage_hint=row.fragment,
                 metadata=_merge(row.raw_metadata, row.facets),
             )
             for row in rows
             if row.score > 0.02
         )
         next_cursor = str(offset + len(rows)) if len(rows) == k else None
-        return IndexPage(hits=hits, cursor=next_cursor, total_estimate=None)
+
+        # Reranking inside the search service, which is where the real one
+        # does it.
+        #
+        # REPLACING THIS
+        # --------------
+        #   POST {PGP_BASE}/v1/knowledgebases/{kb}/search
+        #   { "query": ..., "filters": {...}, "top_k": k, "rerank": true }
+        #
+        # and the service returns fragments already ordered, with the ranker
+        # it used named in the response. Everything below disappears; the
+        # contract above it does not change, which is the point of putting the
+        # capability on the port rather than in the caller.
+        reranked, reranker_id = False, ""
+        if rerank and self._reranker is not None and hits:
+            texts = [
+                # What the index has of each document. It reranks its *own*
+                # fragments, not our recovered passages — those do not exist
+                # on this side of the boundary, and pretending otherwise is
+                # what makes a mock lie about the shape of the system.
+                (h.metadata.get("title") or "") + "\n" + (h.passage_hint or "")
+                for h in hits
+            ]
+            try:
+                order = self._reranker.rerank(query, texts)
+                hits = tuple(
+                    hits[r.index].model_copy(update={"score": float(r.score)})
+                    for r in order
+                )
+                reranked = True
+                reranker_id = getattr(self._reranker, "reranker_id", "cross-encoder")
+            except Exception as exc:  # noqa: BLE001
+                # A ranking failure must not lose the results. The page comes
+                # back in vector order and says it was not reranked, so the
+                # caller can do it itself rather than serving vector order as
+                # though it had been ranked.
+                logger.warning("index-side rerank failed for %s: %s", kb_id, exc)
+
+        return IndexPage(
+            hits=hits, cursor=next_cursor, total_estimate=None,
+            reranked=reranked, reranker_id=reranker_id,
+        )
 
     def list_documents(
         self, kb_id: str, cursor: str | None = None, page_size: int = 500

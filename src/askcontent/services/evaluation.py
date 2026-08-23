@@ -35,6 +35,11 @@ class CaseResult:
     cited: list[str]
     grounded: bool
     elapsed_ms: int
+    #: Set when the answerer failed rather than declined. Such a case is not a
+    #: pass and not a content failure: it did not run. Counting it as failed
+    #: would make a rate limit look like a regression, and the next person
+    #: would go looking for the change that caused it.
+    errored: bool = False
 
 
 class EvaluationService:
@@ -85,6 +90,7 @@ class EvaluationService:
                     answer += chunk
 
             grounded = bool(outcome and outcome.supported)
+            errored = bool(outcome is not None and getattr(outcome, "error", None))
             # Only what the answer *cited*, not everything retrieved. An
             # expectation that a document was cited must not be satisfied by it
             # merely having been considered.
@@ -94,14 +100,18 @@ class EvaluationService:
                 if 1 <= n <= len(evidence.citations)
             ]
 
-            failures = check(
-                expectations,
-                Outcome(answer=answer.strip(), grounded=grounded, cited=tuple(cited)),
+            failures = (
+                [f"the answerer failed: {outcome.error}"]
+                if errored
+                else check(
+                    expectations,
+                    Outcome(answer=answer.strip(), grounded=grounded, cited=tuple(cited)),
+                )
             )
             results.append(
                 CaseResult(
                     case_id=case["id"], question=case["question"],
-                    passed=not failures, failures=failures,
+                    passed=not failures, failures=failures, errored=errored,
                     answer=answer.strip(), cited=cited, grounded=grounded,
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )

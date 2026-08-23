@@ -42,6 +42,12 @@ class RetrievalConfig(BaseModel):
     k_per_channel: int = 20
     rrf_constant: int = 60
     reranker_id: str = "lexical-deterministic"
+    #: Ask the index to rank its own fragments when it can. Preferred where
+    #: available: a cross-encoder inside the search service scores the
+    #: fragments it indexed, while ours scores passages recovered afterwards,
+    #: and those are not the same text. Ignored by an index that does not
+    #: advertise the capability.
+    index_side_rerank: bool = True
     #: How many passages reach the reranker. Everything past it is dropped on
     #: the cheap similarity score, which is reliable about which passages are
     #: worth a careful look and unreliable about their order — so the expensive

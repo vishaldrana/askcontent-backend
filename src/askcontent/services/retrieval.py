@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from pydantic import BaseModel, Field
@@ -84,6 +85,11 @@ class RetrievalTrace(BaseModel):
     stale_index_count: int = 0
     forbidden_count: int = 0
     cache_hit_rate: float = 0.0
+    #: Who ordered the evidence — the index's own cross-encoder, or ours.
+    #: Worth recording: the two produce different orders from the same corpus,
+    #: and an eval run that does not say which one ran cannot be compared with
+    #: another.
+    reranked_by: str = ""
     #: Milliseconds per pipeline stage. Kept permanently rather than added
     #: during an investigation and removed after: "the answer is slow" is
     #: otherwise a question that has to be re-investigated from scratch every
@@ -93,6 +99,14 @@ class RetrievalTrace(BaseModel):
     phase_ms: dict[str, float] = Field(default_factory=dict)
     total_ms: float = 0.0
     refusal: str | None = None
+
+
+@dataclass
+class _Ranked:
+    """The reranker's result shape, for the path where no reranker ran."""
+
+    index: int
+    score: float
 
 
 class _Stopwatch:
@@ -203,7 +217,7 @@ class RetrievalService:
         mark = _Stopwatch(trace)
 
         # ③ candidate generation ------------------------------------------
-        channel_results, channel_traces, degraded = self._generate_candidates(
+        channel_results, channel_traces, degraded, ranked_by = self._generate_candidates(
             connector, spec, filters, principal, config
         )
         mark("candidates")
@@ -325,6 +339,30 @@ class RetrievalService:
         passage_pool.sort(key=lambda row: -row[3])
         passage_pool = passage_pool[: config.rerank_shortlist]
 
+        # If the index already ranked with a cross-encoder, do not rank again.
+        #
+        # A second pass would reorder on a scale it does not own, over
+        # passages the first ranker never saw — the same class of mistake as
+        # merging two rankers' scores, and invisible in the same way, because
+        # the answer still looks reasonable. The index's judgement stands for
+        # which documents matter; the cheap per-passage similarity, already
+        # computed from stored vectors, orders the passages within that.
+        if ranked_by:
+            trace.reranked_by = ", ".join(f"{c}:{r}" for c, r in ranked_by.items())
+            ranked = [
+                _Ranked(index=i, score=score)
+                for i, (_c, _m, _cand, score) in enumerate(passage_pool)
+            ]
+            ranked.sort(key=lambda r: -r.score)
+            citations, conflicts, notices = self._assemble(
+                spec, connector, ranked, passage_pool, candidates, config
+            )
+            mark("rerank")
+            return self._finish(
+                trace, candidates, citations, conflicts, notices, started, config
+            )
+
+        trace.reranked_by = f"local:{self.reranker.reranker_id}"
         texts = [chunk.embed_text for chunk, _, _, _ in passage_pool]
         try:
             ranked = self.reranker.rerank(spec.question, texts)
@@ -367,6 +405,33 @@ class RetrievalService:
             trace=trace,
         )
 
+    def _finish(self, trace, candidates, citations, conflicts, notices, started, config):
+        """The tail every path shares.
+
+        Extracted when index-side reranking added a second exit: two copies of
+        "stamp the trace, decide whether this is a refusal, return" is two
+        places for the refusal rule to drift out of step, and that rule —
+        nothing above the floor is a refusal, not a low-confidence answer — is
+        one of the load-bearing ones.
+        """
+        trace.candidates = tuple(candidates.values())
+        trace.cache_hit_rate = round(self.passages.stats.hit_rate, 4)
+        trace.total_ms = round((time.perf_counter() - started) * 1000, 2)
+
+        if not citations:
+            trace.refusal = (
+                f"no passage scored above the reranker floor ({config.rerank_floor})"
+            )
+            return Evidence(
+                citations=(), trace=trace, refused=True,
+                refusal_reason=trace.refusal, notices=tuple(notices),
+            )
+
+        return Evidence(
+            citations=tuple(citations), conflicts=tuple(conflicts),
+            notices=tuple(notices), trace=trace,
+        )
+
     # -- ③ ------------------------------------------------------------------
 
     def _generate_candidates(self, connector, spec, filters, principal, config):
@@ -377,13 +442,26 @@ class RetrievalService:
         channel_results: dict[str, list[str]] = {}
         traces: list[ChannelTrace] = []
         degraded: list[str] = []
+        #: Which channels came back already ranked by the source. Reported by
+        #: the page rather than assumed from the request: a service under load
+        #: may ignore the flag, and a caller that assumed otherwise would skip
+        #: its own reranking and serve vector order as though it were ranked.
+        ranked_by: dict[str, str] = {}
 
         def run_pgp() -> tuple[list[str], float, str | None]:
             start = time.perf_counter()
             try:
+                # Ask the index to rank its own fragments when it can. The
+                # cross-encoder inside a search service sees the fragments it
+                # actually indexed; ours sees passages we recovered afterwards,
+                # which are not the same text. Where both exist, the one nearer
+                # the data wins.
                 page = self.index.search(
-                    connector.kb_id, spec.question, filters, k=config.k_per_channel
+                    connector.kb_id, spec.question, filters,
+                    k=config.k_per_channel, rerank=config.index_side_rerank,
                 )
+                if page.reranked:
+                    ranked_by["pgp"] = page.reranker_id or "index"
                 doc_ids = [hit.doc_id for hit in page.hits]
                 # Pagination: real indexes do not return everything at once.
                 while page.cursor and len(doc_ids) < config.k_per_channel:
@@ -436,7 +514,7 @@ class RetrievalService:
                 elif doc_ids:
                     channel_results[name] = doc_ids
 
-        return channel_results, traces, degraded
+        return channel_results, traces, degraded, ranked_by
 
     # -- ④ ------------------------------------------------------------------
 

@@ -27,6 +27,15 @@ class AnswerOutcome:
     #: Passage numbers the answer cited that were never offered to it. Always
     #: empty in practice; non-empty is a defect worth alerting on, not hiding.
     invented: tuple[int, ...] = ()
+    #: Set when the answerer itself failed — a timeout, a rate limit, an
+    #: outage.
+    #:
+    #: Distinct from `supported=False`, and the distinction is the whole point.
+    #: Both produce no answer, but one means "the corpus does not cover this"
+    #: and the other means "we could not ask". An eval suite that reports the
+    #: second as the first sends somebody to write content for a question that
+    #: was never actually put.
+    error: str | None = None
 
 
 def to_passages(citations) -> list[Passage]:

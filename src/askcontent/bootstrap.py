@@ -125,7 +125,12 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     sessions = get_session_factory()
 
     embedder = build_embedder()
-    index = PgPgpIndex(engine, embedder)
+    reranker = build_reranker(embedder)
+    # The stub search service gets the cross-encoder, because that is where the
+    # real one lives: inside the index, asked for with a flag on the query. The
+    # same object is still handed to retrieval as a fallback, for indexes that
+    # cannot rank their own fragments.
+    index = PgPgpIndex(engine, embedder, reranker=reranker)
     repository = PgEcmRepository(engine)
     reranker = build_reranker(embedder)
     passages = PassageService(repository, embedder, sandbox=False)

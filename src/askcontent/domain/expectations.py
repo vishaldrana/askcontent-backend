@@ -13,6 +13,10 @@ Five kinds, and each exists because a real failure needed it:
     cites            the answer must rest on a particular document; this is
                      what catches a ranking change that quietly swapped the
                      source out from under a still-plausible answer
+    cites_first      and it must be the *best* source. `cites` alone cannot
+                     see a ranking regression that keeps the right document in
+                     the evidence and pushes it down — which is precisely what
+                     a reranker change does when it goes wrong
     says             an exact string must appear — for figures, thresholds and
                      dates, where a paraphrase is a wrong answer
     does_not_say     for the specific wrong answer somebody has already given
@@ -30,7 +34,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-KINDS = ("answers", "refuses", "cites", "says", "does_not_say")
+KINDS = ("answers", "refuses", "cites", "cites_first", "says", "does_not_say")
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,7 @@ class Expectation:
             "answers": "answers the question",
             "refuses": "refuses to answer",
             "cites": f"cites “{self.value}”",
+            "cites_first": f"cites “{self.value}” first",
             "says": f"says “{self.value}”",
             "does_not_say": f"does not say “{self.value}”",
         }.get(self.kind, f"{self.kind} {self.value}")
@@ -90,6 +95,14 @@ def check(expectations: list[Expectation], outcome: Outcome) -> list[str]:
                 failures.append(
                     f"did not cite “{value}” — cited "
                     f"{', '.join(outcome.cited[:3]) or 'nothing'}"
+                )
+
+        elif kind == "cites_first":
+            if not outcome.cited:
+                failures.append(f"cited nothing, so “{value}” cannot be first")
+            elif _loose(value) not in _loose(outcome.cited[0]):
+                failures.append(
+                    f"cited “{outcome.cited[0]}” first, not “{value}”"
                 )
 
         elif kind == "says":

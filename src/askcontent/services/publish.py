@@ -143,13 +143,13 @@ class ContentPublisher:
             vector = self._embedder.embed_query(f"{title}\n\n{text_body}")
             connection.execute(text(f"""
                 INSERT INTO {STUB}.pgp_index_entry
-                    (doc_id, kb_id, raw_metadata, facets, embedding, stale)
+                    (doc_id, kb_id, raw_metadata, facets, embedding, fragment, stale)
                 VALUES (:doc_id, :kb_id, CAST(:raw AS jsonb), CAST(:facets AS jsonb),
-                        CAST(:embedding AS vector), false)
+                        CAST(:embedding AS vector), :fragment, false)
                 ON CONFLICT (kb_id, doc_id) DO UPDATE SET
                     raw_metadata = EXCLUDED.raw_metadata,
                     facets = EXCLUDED.facets, embedding = EXCLUDED.embedding,
-                    stale = false
+                    fragment = EXCLUDED.fragment, stale = false
             """), {
                 "doc_id": doc_id, "kb_id": kb_id,
                 # The shape a source actually hands over: its own field names,
@@ -170,6 +170,12 @@ class ContentPublisher:
                 }),
                 "facets": json.dumps(facets),
                 "embedding": "[" + ",".join(f"{v:.6f}" for v in vector) + "]",
+                # The index's own extract. Not the document, never cited, and
+                # allowed to lag the store — its jobs are seeding passage
+                # selection and giving an index-side reranker something to
+                # read. Bounded because an index that stores whole documents
+                # is a second copy of the corpus with different staleness.
+                "fragment": text_body.strip()[:1200],
             })
 
     def strip_title_suffix(self, kb_id: str, suffix: str) -> int:

@@ -156,12 +156,18 @@ def evals() -> int:
     ).run(slug)
 
     for result in report["results"]:
-        mark = "PASS" if result["passed"] else "FAIL"
+        # An errored case is neither. Printing it as FAIL would send the next
+        # person looking for the change that broke it.
+        mark = "ERR " if result.get("errored") else ("PASS" if result["passed"] else "FAIL")
         print(f"  {mark}  {result['elapsed_ms']:>6} ms  {result['question'][:60]}")
         for failure in result["failures"]:
             print(f"          {failure}")
 
-    print(f"\n{report['passed']}/{report['total']} passed")
+    errored = sum(1 for r in report["results"] if r.get("errored"))
+    print(f"\n{report['passed']}/{report['total']} passed"
+          + (f", {errored} could not be run" if errored else ""))
+    # Errors still fail the build. A suite that goes green because half of it
+    # did not run is worse than one that goes red.
     return 1 if report["failed"] else 0
 
 

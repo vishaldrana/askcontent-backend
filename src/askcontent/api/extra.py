@@ -1456,15 +1456,21 @@ def _run_answer(platform, question, citations, history, instructions=""):
 
 
 class _AnswerFailure:
-    """An answerer that raised. Reported as an unsupported answer rather than a
-    500: the retrieval work is still valid and the evidence is still worth
-    showing."""
+    """An answerer that raised.
+
+    Reported as an unsupported answer rather than a 500, because the retrieval
+    work is still valid and the evidence is still worth showing — but it
+    carries `error`, so a caller that needs to tell "we could not ask" from
+    "the corpus does not cover this" can. An eval run that conflates them
+    reports an outage as a content gap.
+    """
 
     supported = False
     cited: tuple[int, ...] = ()
     invented: tuple[int, ...] = ()
 
     def __init__(self, message: str) -> None:
+        self.error = message
         self.reason = f"the answerer failed: {message}"
 
 
