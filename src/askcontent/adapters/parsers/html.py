@@ -44,7 +44,14 @@ def _clean(text: str) -> str:
 
 class HtmlParser:
     parser_id = "html-trafilatura"
-    parser_version = "1.1.0"
+    # 1.2.1 — a short extraction no longer disables boilerplate removal.
+    # 1.2.0 — boilerplate removal now applies to short blocks. Before this the
+    # length exemption skipped exactly the navigation it was meant to strip, so
+    # every page in a documentation site carried the same 200-entry menu and
+    # embedded almost identically. Bumping the version is what makes already
+    # indexed documents re-parse: the bytes did not change, our reading of
+    # them did, and the incremental skip has no other way to know that.
+    parser_version = "1.2.1"
 
     def supports(self, mime: str) -> bool:
         return mime in ("text/html", "application/xhtml+xml")
@@ -81,11 +88,22 @@ class HtmlParser:
             main_text = trafilatura.extract(
                 source, include_tables=True, include_links=False, no_fallback=False
             )
-            if main_text and len(main_text) > 200:
+            # Any non-empty extraction is trusted. A length floor here fails
+            # *open* — it disables boilerplate removal for short pages, which
+            # are exactly the pages where a 200-entry menu outweighs the
+            # content. On this corpus 9 pages in 114 are genuinely shorter than
+            # 200 characters, and every one of them was being indexed as
+            # navigation with a sentence attached.
+            if main_text and main_text.strip():
+                # Every line, with no length floor. A floor here is what makes
+                # the whole filter miss navigation: menu entries are *short*
+                # ("Introduction", "Mobile App SDK"), so excluding short lines
+                # from the keep-set and short blocks from the check exempts
+                # precisely the furniture the filter exists to remove.
                 keep = {
                     _fingerprint(line)
                     for line in main_text.splitlines()
-                    if len(line.strip()) > 24
+                    if line.strip()
                 }
         except Exception:  # noqa: BLE001 - extraction is an improvement, not a gate
             keep = None
@@ -139,15 +157,23 @@ class HtmlParser:
             text = _clean(_text(inner))
             if not text:
                 continue
-            if keep is not None and len(text) > 24 and not _retained(text, keep):
-                # Present in the markup, absent from the extracted main
-                # content: navigation, footer or related-links furniture.
-                continue
             kind = {
                 "li": BlockKind.LIST_ITEM,
                 "pre": BlockKind.CODE,
                 "figcaption": BlockKind.CAPTION,
             }.get(tag, BlockKind.PARAGRAPH)
+            if keep is not None and not _retained(text, keep):
+                # Present in the markup, absent from the extracted main
+                # content: navigation, footer or related-links furniture.
+                #
+                # A short *paragraph* gets the benefit of the doubt, because
+                # extractors split and rejoin prose unpredictably and a lost
+                # sentence is worse than a kept one. A short *list item* does
+                # not: that is what a menu is made of.
+                if kind is BlockKind.PARAGRAPH and len(text) <= 24:
+                    pass
+                else:
+                    continue
             blocks.append(
                 Block(
                     kind=kind,
@@ -185,12 +211,21 @@ def _fingerprint(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", text.lower()))[:160]
 
 
+#: Below this many normalised characters a containment match means nothing:
+#: "introduction" is a substring of half the prose on a documentation site, so
+#: every nav entry would find a sponsor and survive.
+_CONTAINMENT_MIN = 24
+
+
 def _retained(text: str, keep: set[str]) -> bool:
     """Line-level matching is fragile across whitespace and entity handling, so
-    compare on a normalised prefix and accept a containment match either way."""
+    compare on a normalised prefix and accept a containment match either way —
+    but only for strings long enough for containment to be evidence."""
     fingerprint = _fingerprint(text)
     if fingerprint in keep:
         return True
+    if len(fingerprint) < _CONTAINMENT_MIN:
+        return False
     return any(fingerprint in k or k in fingerprint for k in keep)
 
 

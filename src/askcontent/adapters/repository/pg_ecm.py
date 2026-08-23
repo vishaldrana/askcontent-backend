@@ -55,6 +55,19 @@ def _significant_terms(query: str) -> list[str]:
     return [w for w in words if len(w) > 2 and w not in _STOPWORDS][:12]
 
 
+def _public_url(doc_id: str, path: str) -> str:
+    """Where a reader goes to see this document.
+
+    The fixture corpus has opaque ids and synthesises a link from the path.
+    Crawled content does not: its id *is* the page it came from, and inventing
+    an `ecm.example.com` link for it produces a citation that 404s — which is
+    worse than no citation, because it looks checkable and isn't.
+    """
+    if doc_id.startswith(("http://", "https://")):
+        return doc_id
+    return f"https://ecm.example.com{path}"
+
+
 class PgEcmRepository:
     def __init__(self, engine) -> None:
         self._engine = engine
@@ -173,7 +186,7 @@ class PgEcmRepository:
             doc_id=row.doc_id,
             kb_id=row.kb_id,
             title=row.title,
-            url=f"https://ecm.example.com{row.path}",
+            url=_public_url(row.doc_id, row.path),
             updated_at=row.updated_at,
             space=row.space,
             owner=row.owner,

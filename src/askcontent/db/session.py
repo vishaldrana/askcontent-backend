@@ -37,6 +37,24 @@ def get_engine():
             pool_size=settings.pool_size,
             max_overflow=settings.pool_max_overflow,
             pool_pre_ping=True,
+            # Recycle below the pooler's idle cutoff. `pool_pre_ping` alone is
+            # not enough: it only detects a connection the peer closed
+            # *cleanly*. A pooler that vanishes mid-crawl leaves a half-open
+            # socket, and the ping itself then blocks — which is exactly how a
+            # long crawl died with "SSL SYSCALL error: Operation timed out"
+            # after 65 seconds of a wedged read.
+            pool_recycle=180,
+            connect_args={
+                # Fail fast instead of hanging on a dead peer. Without
+                # keepalives the OS default is ~2 hours, so a broken
+                # connection is indistinguishable from a slow query for the
+                # rest of the job.
+                "connect_timeout": 10,
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 3,
+            },
             future=True,
         )
         pin_schema(_engine)

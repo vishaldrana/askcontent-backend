@@ -9,6 +9,8 @@ a request that does that times out on the first realistic corpus.
 
 Job kinds:
 
+  collection.crawl_plan    ask a site what it has and write a row per page
+  collection.crawl_load    fetch, parse and store each planned page
   collection.materialise   evaluate the rules and apply the diff
   collection.enrich        recover title, description and dates for each member
   collection.refresh       re-check members by URL and report what changed
@@ -132,6 +134,20 @@ def _finish(sessions, job_id, *, progress: dict, error: str | None,
         session.commit()
 
 
+def _write_progress(sessions, job_id, snapshot: dict) -> None:
+    """Publish progress so a watcher has something real to read.
+
+    Written after every page rather than on a timer: a bar that interpolates is
+    a bar that lies, and on a crawl the interesting information is *which page*,
+    not what fraction.
+    """
+    with sessions() as session:
+        session.execute(text(
+            f"UPDATE {S}.job SET progress = :p WHERE id = :id"
+        ), {"id": job_id, "p": json.dumps(snapshot, default=str)})
+        session.commit()
+
+
 def _run_job(platform, sessions, job) -> dict:
     from .services.enrichment import EnrichmentService
     from .services.indexing import IndexingService
@@ -144,6 +160,43 @@ def _run_job(platform, sessions, job) -> dict:
         connector = platform.registry.get(payload["connector"])
         report = IndexingService(platform, sessions, org_id).index_connector(connector)
         return report.__dict__ | {"summary": report.line()}
+
+    if kind in ("collection.crawl_plan", "collection.crawl_load"):
+        from .adapters.crawl.http_crawler import HttpCrawler
+        from .ports.crawler import CrawlPolicy
+        from .services.crawl_planner import CrawlPlanner
+
+        policy = CrawlPolicy(
+            max_pages=int(payload.get("max_pages", 500)),
+            delay_seconds=float(payload.get("delay_seconds", 0.4)),
+            include=tuple(payload.get("include", ())),
+            exclude=tuple(payload.get("exclude", ())),
+        )
+        from .db.session import get_engine
+        from .services.publish import ContentPublisher
+
+        planner = CrawlPlanner(
+            sessions, org_id, HttpCrawler(policy),
+            progress=lambda snapshot: _write_progress(sessions, job["id"], snapshot),
+            # Crawled pages are published into the index and the store as they
+            # load, so the corpus is answerable the moment the crawl finishes
+            # rather than after a separate step somebody has to remember.
+            publisher=ContentPublisher(get_engine(), platform.embedder),
+        )
+        if kind == "collection.crawl_plan":
+            result = planner.plan(payload["collection"], payload["root"], policy=policy)
+            # Planning is useless on its own, and a person who asked to load a
+            # site should not have to press a second button.
+            if result.get("total"):
+                enqueue(sessions, org_id, "collection.crawl_load",
+                        collection_id=job["collection_id"],
+                        payload={**payload, "root": payload["root"]})
+            return result
+
+        return planner.load(payload["collection"], policy=policy,
+                            batch=int(payload.get("batch", 0)),
+                            kb_id=payload.get("kb_id"), space=payload.get("space"),
+                            should_stop=lambda: _stop)
 
     if kind == "collection.materialise":
         from .api.extra import materialise

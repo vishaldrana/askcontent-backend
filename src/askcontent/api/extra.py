@@ -462,7 +462,7 @@ def collection_detail(slug: str) -> dict:
         """), {"c": collection["id"]}).mappings().all()
 
         jobs = session.execute(text(f"""
-            SELECT kind, status, progress, error, attempts, created_at, finished_at
+            SELECT CAST(id AS text) AS id, kind, status, progress, error, attempts, created_at, finished_at
             FROM {S}.job WHERE collection_id = :c
             ORDER BY created_at DESC LIMIT 8
         """), {"c": collection["id"]}).mappings().all()
@@ -500,6 +500,13 @@ def collection_detail(slug: str) -> dict:
 class JobRequest(BaseModel):
     kind: str = "collection.refresh"
     connector: str | None = None
+    root: str | None = None
+    max_pages: int = 500
+    delay_seconds: float = 0.4
+    #: Where a crawl publishes what it fetches. Both default from the
+    #: collection slug, so the common case needs neither.
+    kb_id: str | None = None
+    space: str | None = None
 
 
 @router.post("/api/collections/{slug}/jobs")
@@ -507,15 +514,70 @@ def enqueue_job(slug: str, body: JobRequest) -> dict:
     """Ask a worker to do something: materialise, enrich, or check for updates."""
     from ..worker import enqueue
 
-    if body.kind not in ("collection.materialise", "collection.enrich", "collection.refresh"):
+    if body.kind not in ("collection.materialise", "collection.enrich",
+                         "collection.refresh", "collection.crawl_plan",
+                         "collection.crawl_load"):
         raise HTTPException(400, f"unknown job kind {body.kind}")
     with _sessions()() as session:
         collection = _collection_row(session, slug)
     job = enqueue(
         _sessions(), _org_of(), body.kind, collection_id=collection["id"],
-        payload={"collection": slug, "connector": body.connector},
+        payload={"collection": slug, "connector": body.connector,
+                 "root": body.root, "max_pages": body.max_pages,
+                 "delay_seconds": body.delay_seconds,
+                 "kb_id": body.kb_id, "space": body.space},
     )
     return {"job_id": job, "kind": body.kind, "status": "queued"}
+
+
+@router.get("/api/jobs/{job_id}/stream")
+def stream_job(job_id: str):
+    """Watch one job.
+
+    Polls the job row and emits a frame whenever the snapshot changes. Polling
+    the database rather than holding the worker's own stream is deliberate: the
+    worker is a separate process, may be on another machine, and may be
+    restarted mid-crawl — the row is the only thing both sides agree on.
+    """
+    import time as _time
+
+    from fastapi.responses import StreamingResponse
+
+    def generate():
+        last = None
+        deadline = _time.monotonic() + 1800
+        while _time.monotonic() < deadline:
+            with _sessions()() as session:
+                row = session.execute(text(f"""
+                    SELECT status, progress, error, attempts, finished_at
+                    FROM {S}.job WHERE id = :id
+                """), {"id": job_id}).mappings().one_or_none()
+
+            if row is None:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'unknown job'})}\n\n"
+                return
+
+            snapshot = {
+                "type": "progress", "status": row["status"],
+                "attempts": row["attempts"], "error": row["error"],
+                **(row["progress"] or {}),
+            }
+            payload = json.dumps(snapshot, default=str)
+            if payload != last:
+                last = payload
+                yield f"data: {payload}\n\n"
+
+            if row["status"] in ("done", "failed"):
+                yield f"data: {json.dumps({'type': 'done', 'status': row['status']})}\n\n"
+                return
+
+            _time.sleep(0.5)
+
+        yield f"data: {json.dumps({'type': 'done', 'status': 'timeout'})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={
+        "cache-control": "no-cache", "x-accel-buffering": "no",
+    })
 
 
 @router.get("/api/jobs")

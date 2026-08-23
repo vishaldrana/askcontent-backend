@@ -47,6 +47,8 @@ _KB_NAMES = {
     "kb-legal-holds": ("Legal Holds", "Litigation holds and matter instructions", True),
     "kb-marketing-web": ("Public Web", "Published marketing and trust pages", False),
 }
+#: A kb absent from the map above is not an error — crawls and uploads mint
+#: knowledgebases at runtime. Their descriptors are derived from the rows.
 
 
 class PgPgpIndex:
@@ -81,8 +83,20 @@ class PgPgpIndex:
             return self._descriptor(connection, kb_id, count)
 
     def _descriptor(self, connection, kb_id: str, count: int) -> KnowledgeBaseDescriptor:
-        name, description, exposes_acl = _KB_NAMES.get(
-            kb_id, (kb_id, "", False)
+        name, description, declared_acl = _KB_NAMES.get(kb_id, (kb_id, "", None))
+        # Whether a knowledgebase exposes ACLs is a fact about its documents,
+        # not an entry in a table written before it existed. A kb created after
+        # this module was — a crawl publishes one — would otherwise report
+        # "no ACLs" while carrying a principal on every row, and the console
+        # would demand a declared access class it does not need.
+        exposes_acl = (
+            declared_acl if declared_acl is not None
+            else bool(connection.execute(text("""
+                SELECT EXISTS (
+                    SELECT 1 FROM ecm_stub.ecm_document
+                    WHERE kb_id = :kb AND acl_principals <> '{}'
+                )
+            """), {"kb": kb_id}).scalar_one())
         )
         return KnowledgeBaseDescriptor(
             kb_id=kb_id,

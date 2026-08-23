@@ -289,6 +289,21 @@ def _seed_connectors(platform: Platform) -> None:
             state=ConnectorState.ACTIVE,
         ),
         dict(
+            # Built by crawling a real public help centre rather than seeded
+            # from a fixture: the pages, their titles and their dates all came
+            # off help.qwary.com. It is here to prove the whole path — crawl,
+            # publish, index, answer — against content nobody wrote for us.
+            connector_id="cn-qwary-help",
+            name="Qwary Help Centre — product documentation",
+            business_group="Customer Support",
+            kb_id="kb-qwary-help", space="QWARY_HELP",
+            exclude=(),
+            groups=("group:all-staff",),
+            ceiling=Sensitivity.PUBLIC,
+            authority=(),
+            state=ConnectorState.ACTIVE,
+        ),
+        dict(
             connector_id="cn-public-web",
             name="Public Web — customer-facing help pages",
             business_group="Digital Content",
@@ -306,7 +321,15 @@ def _seed_connectors(platform: Platform) -> None:
         "kb-risk-controls": {"updated_at": Coercion.DATE_DMY},
     }
 
+    available = {d.kb_id for d in platform.index.list_knowledgebases()}
     for seed in seeds:
+        if seed["kb_id"] not in available:
+            # A connector over a knowledgebase this index does not have cannot
+            # be given a field map, because there are no fields to map. Skip it
+            # rather than fail: the seeds describe several corpora and not every
+            # deployment carries all of them — the crawled ones exist only once
+            # something has actually been crawled.
+            continue
         platform.registry.put(
             Connector(
                 connector_id=seed["connector_id"],
