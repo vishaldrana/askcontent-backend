@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from ...ports.answerer import AnswerChunk, Answerer, Passage
-from .prompt import SYSTEM, render
+from .prompt import render, system_prompt
 
 #: The model's contract for "the passages do not answer this". Recognised here
 #: rather than shown to the reader: it is a protocol token, not prose.
@@ -81,6 +81,7 @@ class LangChainAnswerer(Answerer):
         question: str,
         passages: Sequence[Passage],
         history: Sequence[tuple[str, str]] = (),
+        instructions: str = "",
     ) -> AsyncIterator[AnswerChunk]:
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -95,7 +96,7 @@ class LangChainAnswerer(Answerer):
             return
 
         messages = [
-            SystemMessage(content=SYSTEM),
+            SystemMessage(content=system_prompt(instructions)),
             HumanMessage(content=render(question, passages, history)),
         ]
 

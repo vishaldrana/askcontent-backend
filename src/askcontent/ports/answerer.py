@@ -78,8 +78,13 @@ class Answerer(Protocol):
         question: str,
         passages: Sequence[Passage],
         history: Sequence[tuple[str, str]] = (),
+        instructions: str = "",
     ) -> AsyncIterator[AnswerChunk]:
         """Stream a grounded answer.
+
+        `instructions` is what the knowledgebase's owner added. It shapes tone,
+        vocabulary and format; it cannot switch off attribution, because the
+        grounding rules are assembled after it.
 
         `history` is prior (question, answer) turns in this thread, provided so
         that "and what about Texas?" resolves. It is context for understanding

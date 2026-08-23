@@ -59,6 +59,7 @@ class AnsweringService:
         question: str,
         citations,
         history: Sequence[tuple[str, str]] = (),
+        instructions: str = "",
     ) -> AsyncIterator[tuple[str, AnswerOutcome | None]]:
         """Yield `(text, None)` while writing, then one final `("", outcome)`."""
         passages = to_passages(citations)
@@ -81,7 +82,8 @@ class AnsweringService:
         outcome: AnswerOutcome | None = None
 
         async for chunk in self.answerer.stream(
-            question=question, passages=passages, history=history
+            question=question, passages=passages, history=history,
+            instructions=instructions,
         ):
             if chunk.text:
                 yield chunk.text, None

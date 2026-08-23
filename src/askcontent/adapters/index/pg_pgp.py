@@ -104,8 +104,11 @@ class PgPgpIndex:
             description=description,
             document_count=count,
             last_indexed_at=dt.datetime(2026, 8, 22, 3, 0, 0),
-            embedding_model="pgp-stub-hashed-ngram",
-            embedding_dimension=384,
+            # Reported from the embedder actually in use. A descriptor that
+            # states a model the vectors were not built with is how a
+            # mismatched index goes unnoticed.
+            embedding_model=getattr(self._embedder, "model_id", "unknown"),
+            embedding_dimension=getattr(self._embedder, "dimension", 0),
             exposes_acl=exposes_acl,
             fields=self._field_samples(connection, kb_id, count),
         )

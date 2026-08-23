@@ -65,6 +65,7 @@ class ExtractiveAnswerer(Answerer):
         question: str,
         passages: Sequence[Passage],
         history: Sequence[tuple[str, str]] = (),
+        instructions: str = "",
     ) -> AsyncIterator[AnswerChunk]:
         asked = _terms(question)
         if not passages or not asked:

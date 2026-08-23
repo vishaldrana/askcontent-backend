@@ -10,6 +10,7 @@ import logging
 import os
 from dataclasses import dataclass
 
+from .adapters.embedders import build_embedder
 from .adapters.embedders.hashing import HashingEmbedder
 from .adapters.index.mock_pgp import MockPgpIndex
 from .adapters.repository.mock_ecm import MockEcmRepository
@@ -33,14 +34,22 @@ from .services.retrieval import RetrievalService
 logger = logging.getLogger(__name__)
 
 
-def build_reranker():
+def build_reranker(embedder=None):
     """Cross-encoder when the runtime is installed and enabled, deterministic
     otherwise (CNT-RNK-03).
 
     ASKCONTENT_RERANKER=cross-encoder switches it on; the model is expected to
     be present in the image rather than downloaded at boot.
     """
+    from .config import settings
+
     choice = os.environ.get("ASKCONTENT_RERANKER", "auto")
+
+    # Preference order, best first:
+    #   cross-encoder   trained for this judgement, local, deterministic
+    #   llm             TEMPORARY — a model call per query; see rerankers/llm.py
+    #   embedding       bi-encoder; cannot attend across the pair
+    #   lexical         word overlap; loses whenever the wording differs
     if choice in ("auto", "cross-encoder"):
         try:
             import sentence_transformers  # noqa: F401
@@ -53,10 +62,45 @@ def build_reranker():
         except ImportError:
             if choice == "cross-encoder":
                 raise
-            logger.info(
-                "reranker: sentence-transformers absent, using the deterministic "
-                "lexical reranker (install the 'rerank' extra for the real one)"
+
+    if choice in ("auto", "llm") and settings.llm_api_key:
+        from .adapters.rerankers.embedding import EmbeddingReranker
+        from .adapters.rerankers.llm import LlmReranker
+
+        try:
+            return LlmReranker(
+                model=os.environ.get("ASKCONTENT_RERANK_MODEL", "gpt-4.1-mini"),
+                api_key=settings.llm_api_key,
+                # If the model is unreachable mid-query, ranking degrades to
+                # the bi-encoder rather than collapsing to insertion order.
+                fallback=(
+                    EmbeddingReranker(embedder)
+                    if embedder is not None
+                    and getattr(embedder, "model_id", "") != "hashing-ngram-v1"
+                    else None
+                ),
             )
+        except Exception:  # noqa: BLE001
+            if choice == "llm":
+                raise
+            logger.warning("reranker: llm unavailable, falling back")
+
+    if choice in ("auto", "embedding") and embedder is not None:
+        if getattr(embedder, "model_id", "") != "hashing-ngram-v1":
+            from .adapters.rerankers.embedding import EmbeddingReranker
+
+            logger.info("reranker: embedding bi-encoder (%s)", embedder.model_id)
+            return EmbeddingReranker(embedder)
+        if choice == "embedding":
+            raise RuntimeError(
+                "ASKCONTENT_RERANKER=embedding needs a real embedding model; "
+                "the hashed n-gram bag cannot rank semantically"
+            )
+
+    logger.info(
+        "reranker: deterministic lexical fallback — it scores word overlap, so "
+        "a question worded differently from the document will rank badly"
+    )
     return LexicalReranker()
 
 
@@ -75,10 +119,10 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     engine = get_engine()
     sessions = get_session_factory()
 
-    embedder = HashingEmbedder()
+    embedder = build_embedder()
     index = PgPgpIndex(engine, embedder)
     repository = PgEcmRepository(engine)
-    reranker = build_reranker()
+    reranker = build_reranker(embedder)
     passages = PassageService(repository, embedder, sandbox=False)
     retrieval = RetrievalService(index, repository, embedder, reranker, passages)
 
@@ -164,7 +208,7 @@ def _ensure_org(sessions, slug: str):
 class Platform:
     index: object
     repository: object
-    embedder: HashingEmbedder
+    embedder: object
     reranker: object
     passages: PassageService
     retrieval: RetrievalService
@@ -176,7 +220,7 @@ def build(*, simulate_latency: bool = True, failure_rate: float = 0.0) -> Platfo
     index = MockPgpIndex(simulate_latency=simulate_latency, failure_rate=failure_rate)
     repository = MockEcmRepository(simulate_latency=simulate_latency, failure_rate=failure_rate)
     embedder = HashingEmbedder()
-    reranker = build_reranker()
+    reranker = build_reranker(embedder)
     passages = PassageService(repository, embedder, sandbox=False)
     retrieval = RetrievalService(index, repository, embedder, reranker, passages)
     registry = Registry()

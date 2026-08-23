@@ -388,7 +388,48 @@ def diagnose(connector_id: str, body: dict) -> dict:
     evidence = platform.retrieval.retrieve(
         connector, spec, principal, role_rules=_rules_for_role(connector_id, role)
     )
-    return evidence.model_dump(mode="json")
+
+    payload = evidence.model_dump(mode="json")
+
+    # The answer itself, not just the evidence behind it. Diagnose is where
+    # somebody checks whether a change helped, and "did the retrieval improve"
+    # is a different question from "is the answer better" — the second is the
+    # one that ships. Composing it here makes this screen a test harness rather
+    # than a window onto an intermediate stage.
+    if body.get("answer", True):
+        from ..domain.followups import suggest as suggest_followups
+        from .extra import _instructions_for, _run_answer
+
+        text_out, outcome = "", None
+        for chunk, result in _run_answer(
+            platform, spec.question, evidence.citations, (),
+            _instructions_for(connector_id),
+        ):
+            if result is not None:
+                outcome = result
+            else:
+                text_out += chunk
+
+        payload["answer"] = text_out.strip()
+        payload["grounded"] = bool(outcome and outcome.supported)
+        payload["unsupported_reason"] = (
+            outcome.reason if outcome and not outcome.supported else None
+        )
+        payload["cited"] = list(outcome.cited) if outcome else []
+        payload["answered_by"] = {
+            "provider": platform.answering.answerer.name,
+            "model": platform.answering.answerer.model_id,
+        }
+        payload["followups"] = (
+            [
+                {"question": f.question, "because": f.because}
+                for f in suggest_followups(evidence.citations, question=spec.question)
+            ]
+            if outcome and outcome.supported
+            else []
+        )
+
+    return payload
 
 
 # -------------------------------------------------------------------- health

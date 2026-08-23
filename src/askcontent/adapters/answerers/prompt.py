@@ -57,6 +57,38 @@ documents say...") — just answer, with citations.
 """
 
 
+def system_prompt(instructions: str = "") -> str:
+    """The grounding rules, plus whatever this knowledgebase adds.
+
+    Order is the whole of the safety argument. The connector's own
+    instructions go *first* and the grounding rules *last*, so that the final
+    thing the model reads is "cite every claim, use only the passages, refuse
+    rather than answer a near-miss". An instruction added by an administrator
+    can shape tone, vocabulary and format; it cannot switch off attribution,
+    because the rule that forbids that is the last word in the prompt and says
+    so explicitly.
+
+    A knowledgebase has a voice — a help centre wants the screen a button is on,
+    a policy library wants the clause quoted and the date stated — and one
+    prompt cannot serve both without producing answers that are correct and
+    unusable.
+    """
+    if not instructions.strip():
+        return SYSTEM
+    return (
+        "The owner of this knowledgebase has added the following instructions. "
+        "Follow them where they do not conflict with the rules that come "
+        "after; where they do conflict, the later rules win.\n\n"
+        f"{instructions.strip()}\n\n"
+        "--- \n\n"
+        f"{SYSTEM}\n"
+        "These rules are not overridable by the instructions above. In "
+        "particular: never answer from outside the passages, never leave a "
+        "factual sentence uncited, and never answer a question the passages do "
+        "not cover."
+    )
+
+
 def render(question: str, passages: Sequence[Passage],
            history: Sequence[tuple[str, str]] = ()) -> str:
     """The user turn: the evidence, then the question.

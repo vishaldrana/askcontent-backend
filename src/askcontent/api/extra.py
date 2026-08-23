@@ -1234,6 +1234,61 @@ def delete_embed(slug: str, embed_id: str) -> dict:
 # ------------------------------------------------------------------- settings
 
 
+class SettingsPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    system_instructions: str | None = None
+
+
+#: A prompt long enough to bury the grounding rules is a prompt that weakens
+#: them by dilution rather than by contradiction. The cap is generous for
+#: genuine guidance and short of an essay.
+MAX_INSTRUCTIONS = 4000
+
+
+@router.patch("/api/connectors/{slug}/settings")
+def update_settings(slug: str, body: SettingsPatch) -> dict:
+    if body.system_instructions and len(body.system_instructions) > MAX_INSTRUCTIONS:
+        raise HTTPException(
+            400,
+            f"instructions are {len(body.system_instructions)} characters; the "
+            f"limit is {MAX_INSTRUCTIONS}. Guidance this long buries the rules "
+            f"it sits above rather than adding to them.",
+        )
+
+    with _sessions()() as session:
+        session.execute(text(f"""
+            UPDATE {S}.connector SET
+                name = coalesce(:n, name),
+                description = coalesce(:d, description),
+                system_instructions = coalesce(:si, system_instructions),
+                updated_at = now()
+            WHERE org_id = :o AND slug = :s
+        """), {
+            "o": _org(session), "s": slug, "n": body.name,
+            "d": body.description, "si": body.system_instructions,
+        })
+        session.commit()
+    return get_settings(slug)
+
+
+def _instructions_for(slug: str) -> str:
+    with _sessions()() as session:
+        return session.execute(text(
+            f"SELECT system_instructions FROM {S}.connector "
+            f"WHERE org_id = :o AND slug = :s"
+        ), {"o": _org(session), "s": slug}).scalar_one_or_none() or ""
+
+
+from ..domain.followups import suggest as suggest_followups
+
+
+def _config_settings():
+    from ..config import settings as _s
+
+    return _s
+
+
 @router.get("/api/connectors/{slug}/settings")
 def get_settings(slug: str) -> dict:
     connector = _platform().registry.get(slug)
@@ -1247,14 +1302,52 @@ def get_settings(slug: str) -> dict:
             SELECT kind, status, progress, error, created_at FROM {S}.job
             WHERE connector_id = :c ORDER BY created_at DESC LIMIT 10
         """), {"c": cid}).mappings().all()
+        row_extra = session.execute(text(f"""
+            SELECT name, description, system_instructions
+            FROM {S}.connector WHERE id = :c
+        """), {"c": cid}).mappings().one()
+
+    # Which answerer is actually in use. Reported here because the fallback is
+    # silent otherwise, and an unannounced downgrade to extractive answers is
+    # how a demo becomes a misunderstanding — somebody reads the answers, finds
+    # them poor, and concludes the product is poor.
+    answerer = _platform().answering.answerer
+    configured_key = bool(_config_settings().llm_api_key)
 
     return {
         "connector": slug,
+        "name": row_extra["name"],
+        "description": row_extra["description"],
+        "system_instructions": row_extra["system_instructions"],
+        "business_group": connector.business_group,
+        "kb_id": connector.kb_id,
         "state": str(connector.state),
         "limits": {
             "max_documents": connector.scope.max_documents,
             "max_bytes": connector.scope.max_bytes,
             "sensitivity_ceiling": str(connector.scope.sensitivity_ceiling),
+        },
+        "answering": {
+            "provider": answerer.name,
+            "model": answerer.model_id,
+            "grounded_model": answerer.name != "extractive-offline",
+            "key_configured": configured_key,
+            "note": (
+                "Answers are composed by a model, grounded in the retrieved "
+                "passages and required to cite them."
+                if answerer.name != "extractive-offline"
+                else "No model is configured, so answers are extracted verbatim "
+                     "from the retrieved passages rather than composed. Set "
+                     "ASKCONTENT_LLM_API_KEY to enable a grounded model."
+            ),
+        },
+        "retrieval": {
+            "reranker": connector.retrieval.reranker_id,
+            "rerank_floor": connector.retrieval.rerank_floor,
+            "k_per_channel": connector.retrieval.k_per_channel,
+            "passages_per_document": connector.retrieval.passages_per_document,
+            "expired_days": connector.retrieval.freshness.expired_days,
+            "stale_days": connector.retrieval.freshness.stale_days,
         },
         "quarantine": [dict(q) for q in quarantine],
         "jobs": [dict(j) for j in jobs],
@@ -1306,7 +1399,7 @@ def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
     return [f"This answer cites '{oldest.title}', which has no recorded date."]
 
 
-def _run_answer(platform, question, citations, history):
+def _run_answer(platform, question, citations, history, instructions=""):
     """Drive the async answerer from this synchronous stream.
 
     The endpoint is a sync generator because the retrieval pipeline is
@@ -1325,7 +1418,9 @@ def _run_answer(platform, question, citations, history):
 
     async def pump():
         try:
-            async for item in platform.answering.stream(question, citations, history):
+            async for item in platform.answering.stream(
+                question, citations, history, instructions
+            ):
                 outbox.put(item)
         except Exception as exc:  # noqa: BLE001
             outbox.put(("", _AnswerFailure(str(exc))))
@@ -1487,7 +1582,8 @@ def chat_stream(body: AskStream):
             ]
             outcome = None
             for text, result in _run_answer(
-                platform, body.question, evidence.citations, history
+                platform, body.question, evidence.citations, history,
+                _instructions_for(body.connector_id),
             ):
                 if result is not None:
                     outcome = result
@@ -1499,12 +1595,14 @@ def chat_stream(body: AskStream):
                 "type": "tool_end", "name": "answer",
                 "label": "Composing a grounded answer",
                 "status": "ok" if (outcome and outcome.supported) else "warn",
+                # No provider or model name: the trace is read by whoever is
+                # asking the question, and which vendor answered is a
+                # deployment detail they cannot act on.
                 "detail": (
-                    f"{answerer.name} · "
-                    + (f"cited {len(outcome.cited)} of {len(evidence.citations)}"
-                       if outcome and outcome.supported
-                       else (outcome.reason if outcome and outcome.reason
-                             else "not answerable from this corpus"))
+                    f"cited {len(outcome.cited)} of {len(evidence.citations)} passages"
+                    if outcome and outcome.supported
+                    else (outcome.reason if outcome and outcome.reason
+                          else "not answerable from this corpus")
                 ),
             })
 
@@ -1518,6 +1616,21 @@ def chat_stream(body: AskStream):
                 # don't know" is what makes a refusal look like a bug.
                 payload["citations"] = []
                 payload["unsupported_reason"] = outcome.reason
+            # Constructed from what was actually retrieved, never generated.
+            # A suggestion that turns out to be unanswerable advertises
+            # coverage the corpus does not have and spends the reader's trust
+            # to do it. Only offered when the answer stood up: proposing
+            # follow-ups to "I could not find that" is noise.
+            if outcome is not None and outcome.supported:
+                payload["followups"] = [
+                    {"question": f.question, "because": f.because}
+                    for f in suggest_followups(
+                        evidence.citations, question=body.question
+                    )
+                ]
+            else:
+                payload["followups"] = []
+
             payload["answered_by"] = {
                 "provider": answerer.name, "model": answerer.model_id,
                 "grounded": bool(outcome and outcome.supported),

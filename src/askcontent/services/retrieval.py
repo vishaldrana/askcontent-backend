@@ -238,7 +238,10 @@ class RetrievalService:
 
         # ⑤ passage recovery -----------------------------------------------
         question_vector = self.embedder.embed_query(spec.question)
-        passage_pool: list[tuple[Chunk, DocMetadata, CandidateTrace]] = []
+        #: (chunk, metadata, candidate, selection score). The score comes from
+        #: the stored vectors and costs nothing; it is what shortlists the pool
+        #: before the expensive reranker sees it.
+        passage_pool: list[tuple[Chunk, DocMetadata, CandidateTrace, float]] = []
 
         for metadata, candidate in resolved:
             candidate.title = metadata.title
@@ -269,8 +272,8 @@ class RetrievalService:
                 question_vector, entry.chunks, config.passages_per_document
             )
             candidate.chunks_selected = len(selected)
-            for chunk, _score in selected:
-                passage_pool.append((chunk, metadata, candidate))
+            for chunk, score in selected:
+                passage_pool.append((chunk, metadata, candidate, score))
 
         if not passage_pool:
             trace.candidates = tuple(candidates.values())
@@ -280,7 +283,15 @@ class RetrievalService:
             return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
 
         # ⑥ rerank ----------------------------------------------------------
-        texts = [chunk.embed_text for chunk, _, _ in passage_pool]
+        # Shortlisted first, on the similarity already computed from stored
+        # vectors. A reranker that reads the pair is worth its cost on twenty
+        # candidates and not on eighty: the cheap score is reliable about which
+        # are worth a careful look and unreliable about their order, which is
+        # exactly the division of labour a cascade is for.
+        passage_pool.sort(key=lambda row: -row[3])
+        passage_pool = passage_pool[: config.rerank_shortlist]
+
+        texts = [chunk.embed_text for chunk, _, _, _ in passage_pool]
         try:
             ranked = self.reranker.rerank(spec.question, texts)
         except Exception as exc:  # noqa: BLE001
@@ -503,12 +514,18 @@ class RetrievalService:
             if len(citations) >= config.context_budget_chunks:
                 break
 
-            chunk, metadata, candidate = passage_pool[result.index]
+            chunk, metadata, candidate, _score = passage_pool[result.index]
 
             # Cross-source near-duplicate collapse (CNT-PAR-21). Where the same
             # material exists in two places the canonical copy is cited; citing
             # the shadow copy makes the answer diverge from the system of
             # record the reader will open.
+            # A citation whose span renders blank is worse than one fewer
+            # citation: it shows a document name with nothing under it and
+            # reads as lost text.
+            if not _span_of(chunk).strip():
+                continue
+
             fingerprint = _fingerprint(chunk.text)
             if fingerprint in seen_texts:
                 continue

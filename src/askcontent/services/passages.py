@@ -57,6 +57,50 @@ class StoredPassages:
         self._engine = engine
         self._connector = connector_uuid
 
+    def load_many(self, doc_ids: list[str]) -> dict[str, tuple[Chunk, ...]]:
+        """Every candidate's chunks in one query.
+
+        One query per document is the same SQL twenty times, and against a
+        remote database each is a ~95 ms round trip — two seconds of a
+        question's latency spent on nothing but network. The set is bounded by
+        the candidate count, so a single `IN` is safe.
+        """
+        from sqlalchemy import text
+
+        from ..config import settings
+
+        if not doc_ids:
+            return {}
+
+        schema = settings.db_schema
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    f"""
+                    SELECT d.doc_id, c.chunk_id, c.ordinal, c.text, c.heading_path,
+                           c.parent_text, c.page, c.is_table, c.vector
+                    FROM {schema}.document_chunk c
+                    JOIN {schema}.document d ON d.id = c.document_id
+                    WHERE c.connector_id = :c AND d.doc_id = ANY(:docs)
+                    ORDER BY d.doc_id, c.ordinal
+                    """
+                ),
+                {"c": self._connector, "docs": list(doc_ids)},
+            ).mappings().all()
+
+        out: dict[str, list[Chunk]] = {}
+        for row in rows:
+            out.setdefault(row["doc_id"], []).append(
+                Chunk(
+                    chunk_id=row["chunk_id"], doc_id=row["doc_id"], text=row["text"],
+                    heading_path=tuple(row["heading_path"] or ()),
+                    ordinal=row["ordinal"], page=row["page"],
+                    is_table=row["is_table"], parent_text=row["parent_text"] or "",
+                    vector=list(row["vector"]) if row["vector"] is not None else None,
+                )
+            )
+        return {doc: tuple(chunks) for doc, chunks in out.items()}
+
     def load(self, doc_id: str) -> tuple[Chunk, ...] | None:
         from sqlalchemy import text
 
@@ -68,7 +112,7 @@ class StoredPassages:
                 text(
                     f"""
                     SELECT c.chunk_id, c.ordinal, c.text, c.heading_path,
-                           c.parent_text, c.page, c.is_table
+                           c.parent_text, c.page, c.is_table, c.vector
                     FROM {schema}.document_chunk c
                     JOIN {schema}.document d ON d.id = c.document_id
                     WHERE c.connector_id = :c AND d.doc_id = :doc
@@ -86,6 +130,7 @@ class StoredPassages:
                 heading_path=tuple(row["heading_path"] or ()),
                 ordinal=row["ordinal"], page=row["page"],
                 is_table=row["is_table"], parent_text=row["parent_text"] or "",
+                vector=list(row["vector"]) if row["vector"] is not None else None,
             )
             for row in rows
         )
@@ -118,6 +163,33 @@ class PassageService:
         # then saves parsing but not retrieval.
         version = metadata.version or "content-hash"
         return f"{metadata.doc_id}|{version}|{parser_version}|{CHUNKER_VERSION}"
+
+    def prime(self, metadatas: list) -> None:
+        """Load every candidate's chunks in one query, into the cache.
+
+        Called before the per-document loop so that the loop finds everything
+        already there. Without it the loop issues one query per document, and
+        against a remote database that is seconds of pure latency.
+        """
+        if self.stored is None:
+            return
+        wanted = [m for m in metadatas if self._key(m) not in self._cache]
+        if not wanted:
+            return
+        loaded = self.stored.load_many([m.doc_id for m in wanted])
+        for metadata in wanted:
+            chunks = loaded.get(metadata.doc_id)
+            if not chunks:
+                continue
+            self.from_store += 1
+            self._cache[self._key(metadata)] = CacheEntry(
+                parsed=ParsedDocument(
+                    doc_id=metadata.doc_id, blocks=(),
+                    parser_id="stored", parser_version="-",
+                    parse_path=ParsePath.HTML_TRAFILATURA, quality=ParseQuality(),
+                ),
+                chunks=chunks,
+            )
 
     def load(self, ref: DocRef, metadata: DocMetadata, principal: str) -> CacheEntry:
         key = self._key(metadata)
@@ -174,7 +246,20 @@ class PassageService:
         """
         if not chunks:
             return []
-        vectors = self.embedder.embed([c.embed_text for c in chunks])
+
+        # Chunks loaded from the index already carry the vector they were
+        # indexed with. Only the ones parsed on the fly — a document not yet
+        # indexed — need embedding, and embedding just those turns eighty
+        # network calls per question into none in the common case.
+        pending = [i for i, c in enumerate(chunks) if c.vector is None]
+        fresh = (
+            self.embedder.embed([chunks[i].embed_text for i in pending])
+            if pending else []
+        )
+        vectors: list[list[float]] = [c.vector or [] for c in chunks]
+        for slot, vector in zip(pending, fresh):
+            vectors[slot] = vector
+
         scored = [
             (chunk, cosine(question_vector, vector))
             for chunk, vector in zip(chunks, vectors)

@@ -13,10 +13,18 @@ from .ids import chunk_id
 
 #: Bumped for overlap and code-block handling. The version participates in the
 #: embedding hash, so an upgrade re-embeds exactly the documents it changes.
-CHUNKER_VERSION = "1.1.0"
+# 1.2.1 — heading-only sections are no longer emitted as chunks.
+# 1.2.0 — empty renders are no longer emitted as chunks.
+CHUNKER_VERSION = "1.2.1"
 
 
 class Chunk(BaseModel):
+    #: The embedding, when this chunk came from the index rather than from a
+    #: fresh parse. Carried so that selection does not re-embed text that was
+    #: embedded at index time — which, against a hosted model, was eighty
+    #: network round trips inside a single question.
+    vector: list[float] | None = None
+
     model_config = ConfigDict(frozen=True)
 
     chunk_id: str
@@ -118,6 +126,15 @@ def chunk_document(
             if not buffer:
                 return
             text = _render(buffer)
+            # A section that renders to nothing, or to nothing but its own
+            # heading, is not a passage. It embeds as a bare title — which is
+            # why "Turn off Qwary Branding" outranked the overview page for
+            # "what is Qwary about" — and it cites as a blank quotation under a
+            # real document name, which reads as the system having lost the
+            # text. Neither is worth an index entry.
+            if not _body_of(text).strip():
+                buffer, buffer_tokens = [], 0
+                return
             chunks.append(
                 Chunk(
                     chunk_id=chunk_id(parsed.doc_id, heading_path, ordinal, text),
@@ -198,3 +215,15 @@ def _render(blocks: list[Block]) -> str:
         else:
             parts.append(block.text)
     return "\n\n".join(p for p in parts if p.strip())
+
+
+def _body_of(text: str) -> str:
+    """The chunk without its leading markdown heading.
+
+    Mirrors what the citation renderer strips, so "would this cite as blank"
+    is decided once, here, rather than discovered in the evidence panel.
+    """
+    lines = [line for line in text.split("\n") if line.strip()]
+    while lines and lines[0].lstrip().startswith("#"):
+        lines.pop(0)
+    return "\n".join(lines)

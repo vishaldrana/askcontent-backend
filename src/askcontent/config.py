@@ -62,9 +62,14 @@ class Settings(BaseSettings):
     # -- providers --------------------------------------------------------
     # ARC-TEC-14 — text generation and embedding are configured independently.
     # They are routinely different vendors.
-    embedding_provider: str = "hashing"
-    embedding_model: str = "hashing-ngram-v1"
-    embedding_dimension: int = 384
+    #: "auto" uses a real model when a key is present and the deterministic
+    #: hashed n-gram bag when it is not. The offline one is right for tests and
+    #: materially worse for retrieval: it can only match documents that repeat
+    #: the words of the question.
+    embedding_provider: str = "auto"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_api_key: str | None = None
+    embedding_dim: int = 1536
     reranker: str = "auto"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 

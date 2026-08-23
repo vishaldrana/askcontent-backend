@@ -42,6 +42,11 @@ class RetrievalConfig(BaseModel):
     k_per_channel: int = 20
     rrf_constant: int = 60
     reranker_id: str = "lexical-deterministic"
+    #: How many passages reach the reranker. Everything past it is dropped on
+    #: the cheap similarity score, which is reliable about which passages are
+    #: worth a careful look and unreliable about their order — so the expensive
+    #: ranker is spent only where it changes the answer.
+    rerank_shortlist: int = 24
     rerank_floor: float = 0.08
     max_rerank_pairs: int = 100
     passages_per_document: int = 3
