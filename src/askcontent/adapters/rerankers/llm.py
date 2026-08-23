@@ -33,7 +33,6 @@ cannot be talked into promoting something by its framing.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 
@@ -54,18 +53,21 @@ BATCH = 20
 #:
 #: Everything below the shortlist keeps its cheap score, scaled beneath the
 #: model's lowest, so the tail stays ordered instead of collapsing.
-SHORTLIST = 20
+SHORTLIST = 14
 
 #: Passages are truncated before scoring. Relevance is decided in the first
-#: sentence or two; sending four thousand characters buys nothing and pushes
-#: the batch into a bigger, slower request.
-MAX_CHARS = 700
+#: sentence or two; the rest is tokens the model must read before it can
+#: answer, and every one of them is latency the reader waits through.
+MAX_CHARS = 420
 
 _SYSTEM = """\
-You score how well each passage answers a question. Reply with JSON only.
+You score how well each passage answers a question.
 
-Output: {"scores": [{"i": <passage number>, "s": <0-10>}, ...]} with one entry \
-for every passage you were given, in any order.
+Output exactly one line of `index:score` pairs, one per passage, separated by \
+commas, nothing else. For five passages: 0:8,1:0,2:3,3:10,4:1
+
+Keep the index the passage was given. No JSON, no explanation, no trailing \
+text. Every passage must appear exactly once.
 
 The scale:
   10  directly and completely answers the question
@@ -76,7 +78,7 @@ The scale:
 
 Judge only whether the passage answers THIS question. Do not reward length, \
 confidence, or how well written it is. A short exact answer outranks a long \
-adjacent one. Do not explain. JSON only."""
+adjacent one."""
 
 
 class LlmReranker:
@@ -180,25 +182,38 @@ class LlmReranker:
             HumanMessage(content=f"QUESTION\n{question}\n\nPASSAGES\n{listing}"),
         ])
 
-        payload = _json_of(reply.content if isinstance(reply.content, str) else str(reply.content))
+        raw = reply.content if isinstance(reply.content, str) else str(reply.content)
+        pairs = _scores_of(raw)
+
+        # Carrying the index rather than relying on position is what makes a
+        # short reply safe. A bare list has to be counted to be trusted, and a
+        # model that drops one entry silently shifts every score after it onto
+        # the wrong passage — which is worse than no score, because it promotes
+        # something arbitrary with full confidence.
         out: dict[int, float] = {}
-        for entry in payload.get("scores", []):
-            try:
-                i, s = int(entry["i"]), float(entry["s"])
-            except (KeyError, TypeError, ValueError):
-                continue
+        for i, value in pairs.items():
             if 0 <= i < len(batch):
                 # Normalised to 0..1 because the retrieval config's floor is
                 # tuned against that scale, and a silently different range
                 # would quietly change what gets cited.
-                out[offset + i] = max(0.0, min(1.0, s / 10.0))
+                out[offset + i] = max(0.0, min(1.0, value / 10.0))
+
+        if not out:
+            raise ValueError(f"no usable scores in {raw[:120]!r}")
         return out
 
 
-def _json_of(raw: str) -> dict:
-    """Models fence JSON in markdown about a third of the time."""
-    raw = raw.strip()
-    fenced = re.search(r"```(?:json)?\s*(.+?)```", raw, re.S)
-    if fenced:
-        raw = fenced.group(1).strip()
-    return json.loads(raw)
+def _scores_of(raw: str) -> dict[int, float]:
+    """`index:score` pairs, wherever in the reply they appear.
+
+    Asking for pairs rather than a JSON object per passage is the difference
+    between roughly sixty output tokens and two hundred, and output tokens are
+    what a model's latency is made of. Asking for pairs rather than a bare list
+    is what keeps a dropped entry from shifting every score onto the wrong
+    passage. Models still occasionally wrap the line in a fence or a sentence,
+    so the parse looks for the pattern rather than trusting the shape.
+    """
+    return {
+        int(index): float(score)
+        for index, score in re.findall(r"(\d+)\s*:\s*(\d+(?:\.\d+)?)", raw)
+    }

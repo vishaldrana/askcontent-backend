@@ -84,8 +84,28 @@ class RetrievalTrace(BaseModel):
     stale_index_count: int = 0
     forbidden_count: int = 0
     cache_hit_rate: float = 0.0
+    #: Milliseconds per pipeline stage. Kept permanently rather than added
+    #: during an investigation and removed after: "the answer is slow" is
+    #: otherwise a question that has to be re-investigated from scratch every
+    #: time, and the stage that dominates changes with the deployment — a
+    #: hosted reranker, a distant database and a cold cache are three different
+    #: shapes of the same complaint.
+    phase_ms: dict[str, float] = Field(default_factory=dict)
     total_ms: float = 0.0
     refusal: str | None = None
+
+
+class _Stopwatch:
+    """Records the gap since the last mark, under a name."""
+
+    def __init__(self, trace: RetrievalTrace) -> None:
+        self._trace = trace
+        self._last = time.perf_counter()
+
+    def __call__(self, phase: str) -> None:
+        now = time.perf_counter()
+        self._trace.phase_ms[phase] = round((now - self._last) * 1000, 1)
+        self._last = now
 
 
 class Citation(BaseModel):
@@ -180,10 +200,13 @@ class RetrievalService:
             trace.refusal = f"connector is {connector.state}"
             return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
 
+        mark = _Stopwatch(trace)
+
         # ③ candidate generation ------------------------------------------
         channel_results, channel_traces, degraded = self._generate_candidates(
             connector, spec, filters, principal, config
         )
+        mark("candidates")
         trace.channels = tuple(channel_traces)
         trace.degraded = tuple(degraded)
 
@@ -209,6 +232,7 @@ class RetrievalService:
         # gates below are identical either way — batching changes the number of
         # requests, never the decision.
         batch = self._resolve_batch(connector, list(candidates), principal)
+        mark("resolve_batch")
 
         resolved: list[tuple[DocMetadata, CandidateTrace]] = []
         for doc_id, candidate in candidates.items():
@@ -230,6 +254,8 @@ class RetrievalService:
                 continue
             resolved.append((metadata, candidate))
 
+        mark("resolve")
+
         if not resolved:
             trace.candidates = tuple(candidates.values())
             trace.refusal = "every candidate was dropped at resolution"
@@ -238,6 +264,13 @@ class RetrievalService:
 
         # ⑤ passage recovery -----------------------------------------------
         question_vector = self.embedder.embed_query(spec.question)
+        mark("embed_question")
+
+        # Every candidate's chunks in one query, before the loop below that
+        # would otherwise ask for them one document at a time. Against a
+        # database a network away that is twenty round trips of pure latency.
+        self.passages.prime([metadata for metadata, _ in resolved])
+        mark("prime")
         #: (chunk, metadata, candidate, selection score). The score comes from
         #: the stored vectors and costs nothing; it is what shortlists the pool
         #: before the expensive reranker sees it.
@@ -288,6 +321,7 @@ class RetrievalService:
         # candidates and not on eighty: the cheap score is reliable about which
         # are worth a careful look and unreliable about their order, which is
         # exactly the division of labour a cascade is for.
+        mark("passages")
         passage_pool.sort(key=lambda row: -row[3])
         passage_pool = passage_pool[: config.rerank_shortlist]
 
@@ -304,10 +338,13 @@ class RetrievalService:
                 for i in range(len(texts))
             ]
 
+        mark("rerank")
+
         citations, conflicts, notices = self._assemble(
             spec, connector, ranked, passage_pool, candidates, config
         )
 
+        mark("assemble")
         trace.candidates = tuple(candidates.values())
         trace.cache_hit_rate = round(self.passages.stats.hit_rate, 4)
         trace.total_ms = round((time.perf_counter() - started) * 1000, 2)

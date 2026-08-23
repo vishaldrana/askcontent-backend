@@ -46,7 +46,7 @@ class RetrievalConfig(BaseModel):
     #: the cheap similarity score, which is reliable about which passages are
     #: worth a careful look and unreliable about their order — so the expensive
     #: ranker is spent only where it changes the answer.
-    rerank_shortlist: int = 24
+    rerank_shortlist: int = 16
     rerank_floor: float = 0.08
     max_rerank_pairs: int = 100
     passages_per_document: int = 3

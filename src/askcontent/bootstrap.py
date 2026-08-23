@@ -156,21 +156,50 @@ class _StoredPassagesRouter:
         self._sessions = sessions
         self._org = org_id
 
+    #: The vector is joined in, not decoration. Without it every chunk arrives
+    #: unembedded and passage selection re-embeds all of them at query time —
+    #: against a hosted model that was six to twelve seconds per question,
+    #: spent recomputing vectors already stored at index time.
+    #:
+    #: The join is LEFT: a chunk written before its embedding lands is still a
+    #: usable passage, and dropping it would make an indexing race look like a
+    #: missing document.
+    _COLUMNS = """
+        d.doc_id, c.chunk_id, c.ordinal, c.text, c.heading_path,
+        c.parent_text, c.page, c.is_table, e.vector
+    """
+    _JOIN = """
+        JOIN {schema}.document d ON d.id = c.document_id
+        LEFT JOIN {schema}.embedding e
+               ON e.connector_id = c.connector_id
+              AND e.kind = 'chunk'
+              AND e.ref_id = c.chunk_id
+    """
+
+    def _chunk(self, row):
+        from .domain.chunks import Chunk
+
+        return Chunk(
+            chunk_id=row["chunk_id"], doc_id=row["doc_id"], text=row["text"],
+            heading_path=tuple(row["heading_path"] or ()), ordinal=row["ordinal"],
+            page=row["page"], is_table=row["is_table"],
+            parent_text=row["parent_text"] or "",
+            vector=_as_vector(row["vector"]),
+        )
+
     def load(self, doc_id: str):
         from sqlalchemy import text
 
         from .config import settings
-        from .domain.chunks import Chunk
 
         schema = settings.db_schema
         with self._engine.connect() as connection:
             rows = connection.execute(
                 text(
                     f"""
-                    SELECT c.chunk_id, c.ordinal, c.text, c.heading_path,
-                           c.parent_text, c.page, c.is_table
+                    SELECT {self._COLUMNS}
                     FROM {schema}.document_chunk c
-                    JOIN {schema}.document d ON d.id = c.document_id
+                    {self._JOIN.format(schema=schema)}
                     WHERE c.org_id = :org AND d.doc_id = :doc
                     ORDER BY c.ordinal
                     """
@@ -179,15 +208,58 @@ class _StoredPassagesRouter:
             ).mappings().all()
         if not rows:
             return None
-        return tuple(
-            Chunk(
-                chunk_id=r["chunk_id"], doc_id=doc_id, text=r["text"],
-                heading_path=tuple(r["heading_path"] or ()), ordinal=r["ordinal"],
-                page=r["page"], is_table=r["is_table"],
-                parent_text=r["parent_text"] or "",
-            )
-            for r in rows
-        )
+        return tuple(self._chunk(r) for r in rows)
+
+    def load_many(self, doc_ids: list[str]) -> dict:
+        """Every candidate's chunks in one query.
+
+        One query per document is the same statement twenty times, and against
+        a database a network away each is a round trip inside the reader's
+        wait. The set is bounded by the candidate count, so a single `ANY` is
+        safe.
+        """
+        from sqlalchemy import text
+
+        from .config import settings
+
+        if not doc_ids:
+            return {}
+
+        schema = settings.db_schema
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    f"""
+                    SELECT {self._COLUMNS}
+                    FROM {schema}.document_chunk c
+                    {self._JOIN.format(schema=schema)}
+                    WHERE c.org_id = :org AND d.doc_id = ANY(:docs)
+                    ORDER BY d.doc_id, c.ordinal
+                    """
+                ),
+                {"org": self._org, "docs": list(doc_ids)},
+            ).mappings().all()
+
+        out: dict[str, list] = {}
+        for row in rows:
+            out.setdefault(row["doc_id"], []).append(self._chunk(row))
+        return {doc: tuple(chunks) for doc, chunks in out.items()}
+
+
+def _as_vector(raw) -> list[float] | None:
+    """pgvector over a raw `text()` query comes back as `'[0.1,0.2,…]'`.
+
+    The driver only knows to hand back a list when the column is typed, and a
+    hand-written SELECT carries no type information — so `list(raw)` silently
+    produces a list of *characters*, which fails validation a thousand
+    elements later with a message about a comma.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        body = raw.strip().lstrip("[").rstrip("]")
+        return [float(part) for part in body.split(",")] if body else None
+    return list(raw)
 
 
 def _ensure_org(sessions, slug: str):
