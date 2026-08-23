@@ -1427,7 +1427,25 @@ def _run_answer(platform, question, citations, history, instructions=""):
         finally:
             outbox.put(_END)
 
-    thread = threading.Thread(target=lambda: asyncio.run(pump()), daemon=True)
+    def drive() -> None:
+        """Own the loop explicitly rather than using `asyncio.run`.
+
+        `asyncio.run` finalises async generators as it closes, and the
+        provider's streaming generator objects to being thrown into after the
+        iteration has already finished — which surfaced as
+        "generator didn't stop after athrow()" printed after every otherwise
+        successful run. Shutting the generators down first, then closing, is
+        the ordering it expects. An error printed on every success is how
+        people learn to ignore errors.
+        """
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(pump())
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=drive, daemon=True)
     thread.start()
 
     while True:
@@ -2134,3 +2152,208 @@ def append_turn(thread_id: str, body: TurnCreate) -> dict:
         """), {"t": thread_id, "o": org, "q": body.question})
         session.commit()
         return {"id": turn_id, "ordinal": ordinal, "thread_id": thread["id"]}
+
+
+# ------------------------------------------------------- feedback and evals
+#
+# A thumbs-down is a question that was answered badly, which is the same thing
+# as a test case nobody has written yet. The two are one feature.
+
+
+#: Closed, because a free-text reason is a field nobody can group by. Each of
+#: these points at a different fix, which is the only justification for asking.
+REASONS = {
+    "wrong": "The answer is wrong",
+    "incomplete": "The answer is incomplete",
+    "should_have_answered": "It refused, but the answer is in our content",
+    "should_not_have_answered": "It answered from the wrong thing",
+    "outdated": "The source it cited is out of date",
+    "unclear": "The answer is hard to follow",
+}
+
+
+class FeedbackCreate(BaseModel):
+    connector_id: str
+    question: str
+    answer: str = ""
+    citations: list[dict] = []
+    verdict: str
+    reason: str | None = None
+    comment: str | None = None
+    thread_id: str | None = None
+    turn_id: str | None = None
+    actor: str | None = None
+
+
+@router.get("/api/feedback/reasons")
+def feedback_reasons() -> dict:
+    return {"reasons": [{"value": k, "label": v} for k, v in REASONS.items()]}
+
+
+@router.post("/api/feedback", status_code=201)
+def create_feedback(body: FeedbackCreate) -> dict:
+    if body.verdict not in ("helpful", "unhelpful"):
+        raise HTTPException(400, "verdict must be helpful or unhelpful")
+    if body.reason and body.reason not in REASONS:
+        raise HTTPException(400, f"unknown reason {body.reason}")
+
+    with _sessions()() as session:
+        cid = _connector_id(session, body.connector_id)
+        fid = session.execute(text(f"""
+            INSERT INTO {S}.answer_feedback
+                (org_id, connector_id, thread_id, turn_id, question, answer,
+                 citations, verdict, reason, comment, actor)
+            VALUES (:o, :c, CAST(NULLIF(:th, '') AS uuid),
+                    CAST(NULLIF(:tu, '') AS uuid), :q, :a, CAST(:cit AS jsonb),
+                    :v, :r, :cm, :actor)
+            RETURNING CAST(id AS text)
+        """), {
+            "o": _org(session), "c": cid, "th": body.thread_id or "",
+            "tu": body.turn_id or "", "q": body.question, "a": body.answer,
+            "cit": json.dumps(body.citations, default=str), "v": body.verdict,
+            "r": body.reason, "cm": body.comment, "actor": body.actor,
+        }).scalar_one()
+        session.commit()
+    return {"id": fid}
+
+
+@router.get("/api/connectors/{slug}/feedback")
+def list_feedback(slug: str, open_only: bool = True, limit: int = 50) -> dict:
+    """Unhelpful first, and by default only the ones not yet turned into tests.
+
+    A review queue that also lists what has already been dealt with grows
+    without bound and stops being looked at.
+    """
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        rows = session.execute(text(f"""
+            SELECT CAST(id AS text) AS id, question, answer, citations, verdict,
+                   reason, comment, actor, created_at,
+                   CAST(promoted_case_id AS text) AS promoted_case_id
+            FROM {S}.answer_feedback
+            WHERE connector_id = :c AND org_id = :o
+              AND (NOT :open_only OR (verdict = 'unhelpful' AND promoted_case_id IS NULL))
+            ORDER BY (verdict = 'unhelpful') DESC, created_at DESC
+            LIMIT :n
+        """), {"c": cid, "o": _org(session), "open_only": open_only, "n": limit}).mappings().all()
+
+        counts = session.execute(text(f"""
+            SELECT verdict, count(*) AS n FROM {S}.answer_feedback
+            WHERE connector_id = :c AND org_id = :o GROUP BY verdict
+        """), {"c": cid, "o": _org(session)}).mappings().all()
+
+    tally = {r["verdict"]: r["n"] for r in counts}
+    helpful, unhelpful = tally.get("helpful", 0), tally.get("unhelpful", 0)
+    return {
+        "items": [dict(r) for r in rows],
+        "helpful": helpful,
+        "unhelpful": unhelpful,
+        # Reported as a share only when there is enough to mean anything. Three
+        # ratings out of two hundred conversations is not a satisfaction rate,
+        # and printing one as though it were invites a decision on noise.
+        "rate": round(helpful / (helpful + unhelpful), 3)
+        if helpful + unhelpful >= 10 else None,
+        "reasons": [{"value": k, "label": v} for k, v in REASONS.items()],
+    }
+
+
+class CaseCreate(BaseModel):
+    question: str
+    expectations: list[dict] = []
+    note: str = ""
+    role: str | None = None
+    origin: str = "authored"
+    from_feedback: str | None = None
+
+
+@router.get("/api/connectors/{slug}/evals")
+def list_cases(slug: str) -> dict:
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        cases = session.execute(text(f"""
+            SELECT CAST(id AS text) AS id, question, expectations, note, origin,
+                   enabled, role, created_at
+            FROM {S}.eval_case WHERE connector_id = :c AND org_id = :o
+            ORDER BY created_at
+        """), {"c": cid, "o": _org(session)}).mappings().all()
+        runs = session.execute(text(f"""
+            SELECT CAST(id AS text) AS id, started_at, finished_at, total,
+                   passed, failed, context
+            FROM {S}.eval_run WHERE connector_id = :c AND org_id = :o
+            ORDER BY started_at DESC LIMIT 10
+        """), {"c": cid, "o": _org(session)}).mappings().all()
+
+        latest = None
+        if runs:
+            latest = [
+                dict(r) for r in session.execute(text(f"""
+                    SELECT CAST(case_id AS text) AS case_id, question, passed,
+                           failures, answer, cited, grounded, elapsed_ms
+                    FROM {S}.eval_result WHERE run_id = CAST(:r AS uuid)
+                """), {"r": runs[0]["id"]}).mappings().all()
+            ]
+
+    return {
+        "cases": [dict(c) for c in cases],
+        "runs": [dict(r) for r in runs],
+        "latest_results": latest or [],
+        "kinds": [
+            {"value": "answers", "label": "Answers the question"},
+            {"value": "refuses", "label": "Refuses to answer"},
+            {"value": "cites", "label": "Cites a document"},
+            {"value": "says", "label": "Says exactly"},
+            {"value": "does_not_say", "label": "Does not say"},
+        ],
+    }
+
+
+@router.post("/api/connectors/{slug}/evals", status_code=201)
+def create_case(slug: str, body: CaseCreate) -> dict:
+    from ..domain.expectations import KINDS
+
+    for expectation in body.expectations:
+        if expectation.get("kind") not in KINDS:
+            raise HTTPException(400, f"unknown expectation {expectation.get('kind')}")
+
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        case_id = session.execute(text(f"""
+            INSERT INTO {S}.eval_case
+                (org_id, connector_id, question, expectations, note, origin, role)
+            VALUES (:o, :c, :q, CAST(:e AS jsonb), :n, :orig, :role)
+            RETURNING CAST(id AS text)
+        """), {
+            "o": _org(session), "c": cid, "q": body.question,
+            "e": json.dumps(body.expectations), "n": body.note,
+            "orig": body.origin, "role": body.role,
+        }).scalar_one()
+
+        # Closing the loop: the complaint leaves the queue because it has
+        # become a test, not because somebody dismissed it.
+        if body.from_feedback:
+            session.execute(text(f"""
+                UPDATE {S}.answer_feedback SET promoted_case_id = CAST(:case AS uuid),
+                       updated_at = now()
+                 WHERE id = CAST(:f AS uuid) AND org_id = :o
+            """), {"case": case_id, "f": body.from_feedback, "o": _org(session)})
+        session.commit()
+    return {"id": case_id}
+
+
+@router.delete("/api/connectors/{slug}/evals/{case_id}")
+def delete_case(slug: str, case_id: str) -> dict:
+    with _sessions()() as session:
+        session.execute(text(
+            f"DELETE FROM {S}.eval_case WHERE id = CAST(:i AS uuid) AND org_id = :o"
+        ), {"i": case_id, "o": _org(session)})
+        session.commit()
+    return {"deleted": case_id}
+
+
+@router.post("/api/connectors/{slug}/evals/run")
+def run_evals(slug: str, body: dict | None = None) -> dict:
+    from ..services.evaluation import EvaluationService
+
+    platform = _platform()
+    service = EvaluationService(platform, _sessions(), _org_of())
+    return service.run(slug, case_ids=(body or {}).get("case_ids"))

@@ -129,6 +129,42 @@ def ask(question: str, connector_id: str = "cn-people-ops", principal: str = "us
     return 0
 
 
+def evals() -> int:
+    """Run a connector's eval suite and exit non-zero if anything fails.
+
+    The exit code is the point. A suite that reports into a dashboard is a
+    suite that goes red on a Friday and is noticed the following quarter; one
+    that fails a build is one somebody fixes. This is what belongs in CI after
+    any change to retrieval, chunking, the prompt or a model.
+
+        python -m askcontent.cli evals cn-qwary-help
+    """
+    import sys
+
+    from .bootstrap import build_postgres
+    from .db.session import get_session_factory
+    from .services.evaluation import EvaluationService
+
+    slug = sys.argv[2] if len(sys.argv) > 2 else None
+    if not slug:
+        print("usage: python -m askcontent.cli evals <connector>")
+        return 2
+
+    platform = build_postgres()
+    report = EvaluationService(
+        platform, get_session_factory(), platform.registry.org_id
+    ).run(slug)
+
+    for result in report["results"]:
+        mark = "PASS" if result["passed"] else "FAIL"
+        print(f"  {mark}  {result['elapsed_ms']:>6} ms  {result['question'][:60]}")
+        for failure in result["failures"]:
+            print(f"          {failure}")
+
+    print(f"\n{report['passed']}/{report['total']} passed")
+    return 1 if report["failed"] else 0
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if not argv:
@@ -143,6 +179,8 @@ def main() -> int:
         return index(*rest)
     if command == "ask":
         return ask(*rest)
+    if command == "evals":
+        return evals()
     print(f"unknown command: {command}")
     return 2
 
