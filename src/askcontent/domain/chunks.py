@@ -13,9 +13,12 @@ from .ids import chunk_id
 
 #: Bumped for overlap and code-block handling. The version participates in the
 #: embedding hash, so an upgrade re-embeds exactly the documents it changes.
+# 1.3.0 — sections too small to answer anything are merged with their
+#          neighbours. Help content numbers its steps as headings, which
+#          shattered every procedure into one fragment per step.
 # 1.2.1 — heading-only sections are no longer emitted as chunks.
 # 1.2.0 — empty renders are no longer emitted as chunks.
-CHUNKER_VERSION = "1.2.1"
+CHUNKER_VERSION = "1.3.0"
 
 
 class Chunk(BaseModel):
@@ -182,7 +185,60 @@ def chunk_document(
 
         flush()
 
-    return chunks
+    return _merge_runts(chunks, target_tokens)
+
+
+#: A chunk below this many characters is not a passage, whatever the document
+#: structure says. Set by what it has to catch: "Pass your URL" is 13.
+MIN_CHUNK_CHARS = 240
+
+
+def _merge_runts(chunks: list[Chunk], target_tokens: int) -> list[Chunk]:
+    """Join sections too small to answer anything.
+
+    Structure-aware chunking assumes headings mark subjects. Help content
+    breaks that assumption constantly: it numbers its steps as headings, so a
+    six-step procedure becomes six sections, and each one chunks into a
+    fragment like "Pass your URL" or "Click on Insert".
+
+    Individually those retrieve badly and answer nothing — a reader asking how
+    to add a hyperlink got three citations from the right page, reading
+    "- Adding Hyperlink to Survey Text", "Guide to add Anchor Tag" and "Pass
+    your URL", with the actual steps in none of them. The instructions were in
+    the corpus and could not be assembled from what came back.
+
+    So neighbouring sections are merged until they are large enough to stand
+    on their own. The heading path of the first survives, because it is the
+    one nearest the top of the section and therefore the most general — and
+    the merged text keeps every heading inline, so no step loses its label.
+
+    Merging only runs forward through a document and never across documents;
+    order within a document is the order the author wrote.
+    """
+    if not chunks:
+        return chunks
+
+    merged: list[Chunk] = []
+    for chunk in chunks:
+        if merged and len(merged[-1].text) < MIN_CHUNK_CHARS:
+            previous = merged[-1]
+            combined = f"{previous.text}\n\n{chunk.text}"
+            # Never merge past the size a single chunk is allowed to be; a
+            # runt followed by a long section should stay two.
+            if len(combined) <= target_tokens * 6:
+                merged[-1] = previous.model_copy(
+                    update={
+                        "text": combined,
+                        "is_table": previous.is_table or chunk.is_table,
+                        "is_code": previous.is_code or chunk.is_code,
+                    }
+                )
+                continue
+        merged.append(chunk)
+
+    # Ordinals are positions, so they are renumbered rather than left with the
+    # gaps merging created — a citation that names chunk 7 of 4 is a puzzle.
+    return [c.model_copy(update={"ordinal": i}) for i, c in enumerate(merged)]
 
 
 def _group_by_heading_path(
