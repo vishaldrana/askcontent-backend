@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -77,6 +78,13 @@ def _cors(origin: str | None) -> dict[str, str]:
 
 @router.options("/ask")
 def widget_preflight(origin: str | None = Header(default=None)):
+    from fastapi.responses import Response
+
+    return Response(status_code=204, headers=_cors(origin))
+
+
+@router.options("/starters")
+def widget_starters_preflight(origin: str | None = Header(default=None)):
     from fastapi.responses import Response
 
     return Response(status_code=204, headers=_cors(origin))
@@ -138,6 +146,60 @@ def _origin_allowed(embed: dict, origin: str | None) -> bool:
     return f"{parts.scheme}://{parts.netloc}" in {a.rstrip("/") for a in allowed}
 
 
+@router.get("/starters")
+def widget_starters(
+    x_askcontent_key: str = Header(default=""),
+    origin: str | None = Header(default=None),
+):
+    """What to offer a visitor who has not asked anything yet.
+
+    The same suggestions the console shows, resolved through the publishable
+    key rather than a connector name — the widget cannot name a connector, and
+    this endpoint must not become the first place it can.
+
+    Origin-checked like /ask. A corpus's section titles are not secret, but
+    they do describe what a company documents, and an endpoint that hands them
+    to any page holding a leaked key is a slower version of the same leak.
+    """
+    from fastapi.responses import JSONResponse
+
+    from ..domain.starters import choose
+    from ..services.retrieval import scope_population
+    from .extra import _connector_id, _sessions
+
+    if not x_askcontent_key:
+        raise HTTPException(404, "This assistant is not configured on this page.")
+
+    embed = _embed_for(x_askcontent_key)
+    if not _origin_allowed(embed, origin):
+        raise HTTPException(403, "not permitted on this origin", headers=_cors(origin))
+    if embed["state"] != "active":
+        raise HTTPException(404, "This assistant is not configured on this page.")
+
+    slug = embed["connector"]
+    platform = _platform()
+    connector = platform.registry.get(slug)
+
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        weights = {
+            r["doc_id"]: r["chunks"]
+            for r in session.execute(text(f"""
+                SELECT d.doc_id AS doc_id, count(*) AS chunks
+                  FROM {S}.document_chunk c
+                  JOIN {S}.document d ON d.id = c.document_id
+                 WHERE c.connector_id = :c
+                 GROUP BY d.doc_id
+            """), {"c": cid}).mappings().all()
+        }
+
+    starters = choose(scope_population(platform.index, connector), weights=weights)
+    return JSONResponse(
+        {"starters": [s.model_dump(mode="json") for s in starters]},
+        headers=_cors(origin),
+    )
+
+
 @router.post("/ask")
 async def widget_ask(
     request: Request,
@@ -195,12 +257,27 @@ async def widget_ask(
     principal = _principal_from_token(authorization, body.get("user"))
 
     def generate():
+        started = time.monotonic()
+
+        def step(label: str, at: float) -> str:
+            """One stage, named, with what it cost.
+
+            Stage names and timings only — never the trace, which names the
+            documents a visitor was refused and is therefore a question about
+            somebody else's access. What is left is what the console's own
+            steps header shows: that the work happened, and how long it took.
+            """
+            return _frame("step", json.dumps({
+                "label": label, "ms": round((time.monotonic() - at) * 1000),
+            }))
+
         try:
             # Same routing as the console. "What can you help with" is the
             # first thing a visitor types into a widget, and a refusal there
             # is the whole product's first impression.
             about = _answer_about_the_corpus(slug, question)
             if about is not None:
+                yield step("Described the collection", started)
                 yield _frame("token", about)
                 yield _frame("evidence", json.dumps({
                     "citations": [], "conflicts": [], "notices": [],
@@ -216,10 +293,17 @@ async def widget_ask(
                 channels=connector.retrieval.channels,
                 k_per_channel=connector.retrieval.k_per_channel,
             )
+            search_at = time.monotonic()
             evidence = platform.retrieval.retrieve(
                 connector, spec, principal, glossary=_glossary_for(slug)
             )
+            yield step(
+                f"Searched {len(evidence.citations)} passage"
+                f"{'' if len(evidence.citations) == 1 else 's'}",
+                search_at,
+            )
 
+            answer_at = time.monotonic()
             outcome = None
             for chunk, result in _run_answer(
                 platform, question, evidence.citations, (),
@@ -229,6 +313,8 @@ async def widget_ask(
                     outcome = result
                 elif chunk:
                     yield _frame("token", chunk)
+
+            yield step("Composed the answer", answer_at)
 
             payload = evidence.model_dump(mode="json")
             if outcome is not None and not outcome.supported:
