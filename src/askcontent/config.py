@@ -68,11 +68,13 @@ class Settings(BaseSettings):
     reranker: str = "auto"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
-    #: "auto" uses the model when a key is present and the extractive stand-in
-    #: when it is not; "anthropic" or "extractive" force one.
-    answer_provider: str = "auto"
-    answer_model: str = "claude-sonnet-5"
-    anthropic_api_key: str | None = None
+    #: The same triple askdb uses, so one deployment configures both the same
+    #: way. "auto" uses the model when a key is present and the extractive
+    #: stand-in when it is not; "extractive" forces offline answers.
+    llm_provider: str = "auto"
+    llm_model: str = "gpt-4.1-2025-04-14"
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
     #: Share of a question's content words that must appear in the retrieved
     #: passages before an answer is attempted. See domain/groundedness.py.
     relevance_floor: float = 0.34

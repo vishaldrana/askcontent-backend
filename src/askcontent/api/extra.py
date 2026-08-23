@@ -1021,6 +1021,29 @@ class AskStream(BaseModel):
     role: str | None = None
 
 
+def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
+    """Warn about the age of what the answer actually leant on.
+
+    Raised after answering rather than after retrieval, because before the
+    answer exists there is no way to know which of a dozen candidates matter.
+    A warning about a document nobody cited is the kind of noise that teaches
+    a reader to skip warnings.
+    """
+    used = [citations[n - 1] for n in cited if 1 <= n <= len(citations)]
+    stale = [c for c in used if str(c.staleness) in ("stale", "expired")]
+    if not stale:
+        return []
+
+    oldest = min(
+        stale,
+        key=lambda c: c.updated_at or dt.datetime.max.replace(tzinfo=dt.UTC),
+    )
+    if oldest.updated_at:
+        return [f"This answer cites '{oldest.title}', last updated "
+                f"{oldest.updated_at:%d %b %Y}."]
+    return [f"This answer cites '{oldest.title}', which has no recorded date."]
+
+
 def _run_answer(platform, question, citations, history):
     """Drive the async answerer from this synchronous stream.
 
@@ -1195,6 +1218,9 @@ def chat_stream(body: AskStream):
             })
 
             payload = evidence.model_dump(mode="json")
+            payload["notices"] = list(payload.get("notices") or []) + _age_notices(
+                evidence.citations, outcome.cited if outcome else ()
+            )
             if outcome is not None and not outcome.supported:
                 # Nothing supported the answer, so nothing may be shown as
                 # supporting it. Leaving the passages on screen under an "I

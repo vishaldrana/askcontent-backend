@@ -44,6 +44,7 @@ def _clean(text: str) -> str:
 
 class HtmlParser:
     parser_id = "html-trafilatura"
+    # 1.2.2 — an empty fingerprint no longer poisons the keep-set.
     # 1.2.1 — a short extraction no longer disables boilerplate removal.
     # 1.2.0 — boilerplate removal now applies to short blocks. Before this the
     # length exemption skipped exactly the navigation it was meant to strip, so
@@ -51,7 +52,7 @@ class HtmlParser:
     # embedded almost identically. Bumping the version is what makes already
     # indexed documents re-parse: the bytes did not change, our reading of
     # them did, and the incremental skip has no other way to know that.
-    parser_version = "1.2.1"
+    parser_version = "1.2.2"
 
     def supports(self, mime: str) -> bool:
         return mime in ("text/html", "application/xhtml+xml")
@@ -100,10 +101,14 @@ class HtmlParser:
                 # ("Introduction", "Mobile App SDK"), so excluding short lines
                 # from the keep-set and short blocks from the check exempts
                 # precisely the furniture the filter exists to remove.
+                # Empty fingerprints must never enter the keep-set. A line of
+                # "1." or a bullet normalises to "", and `"" in anything` is
+                # True — one such line silently retains every block on the
+                # page and disables the filter completely.
                 keep = {
-                    _fingerprint(line)
+                    fingerprint
                     for line in main_text.splitlines()
-                    if line.strip()
+                    if (fingerprint := _fingerprint(line))
                 }
         except Exception:  # noqa: BLE001 - extraction is an improvement, not a gate
             keep = None
@@ -226,7 +231,12 @@ def _retained(text: str, keep: set[str]) -> bool:
         return True
     if len(fingerprint) < _CONTAINMENT_MIN:
         return False
-    return any(fingerprint in k or k in fingerprint for k in keep)
+    # Both sides must be long enough for containment to be evidence. A short
+    # kept line contained in a long block says nothing about the block.
+    return any(
+        len(k) >= _CONTAINMENT_MIN and (fingerprint in k or k in fingerprint)
+        for k in keep
+    )
 
 
 def _parse_table(inner: str) -> TableData | None:
