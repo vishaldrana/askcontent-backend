@@ -422,6 +422,11 @@ class DocumentChunk(Base, PkMixin, TenantMixin, TimestampMixin):
     # Prepended before embedding (CNT-CHK-02): "Rate limits" under API › v2 and
     # under Support › Escalation are different subjects.
     heading_path: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    # The tail of the previous chunk in the same section, embedded with this
+    # one and never cited. Persisted so the row carries everything its vector
+    # was built from — it cannot be recovered from the neighbouring rows,
+    # because runt-merging joins chunks after the overlap has been assigned.
+    overlap: Mapped[str] = mapped_column(Text, default="", nullable=False)
     # Parent-child (CNT-CHK-04): the child is embedded, the parent is returned.
     parent_text: Mapped[str | None] = mapped_column(Text)
     page: Mapped[int | None] = mapped_column(Integer)

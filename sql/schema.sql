@@ -11,7 +11,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict IupchSz9ag2dFbAP07RaRnY3ynZh7HejFOID0RT5MZbRvkX4JOLJGxCOZMClqhv
+\restrict m66fdwBQSMtWIwjFhW7O8OUrFqpr8WMnX9GWQhse3xt4QVqg2A0g83YXHsf02AB
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.7 (Homebrew)
@@ -376,7 +376,8 @@ CREATE TABLE askcontent.document_chunk (
     org_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    is_code boolean DEFAULT false NOT NULL
+    is_code boolean DEFAULT false NOT NULL,
+    overlap text DEFAULT ''::text NOT NULL
 );
 
 ALTER TABLE ONLY askcontent.document_chunk FORCE ROW LEVEL SECURITY;
@@ -2771,5 +2772,5 @@ CREATE POLICY workspace_tenant_isolation ON askcontent.workspace USING ((org_id 
 -- PostgreSQL database dump complete
 --
 
-\unrestrict IupchSz9ag2dFbAP07RaRnY3ynZh7HejFOID0RT5MZbRvkX4JOLJGxCOZMClqhv
+\unrestrict m66fdwBQSMtWIwjFhW7O8OUrFqpr8WMnX9GWQhse3xt4QVqg2A0g83YXHsf02AB
 

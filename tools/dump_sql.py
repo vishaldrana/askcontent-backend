@@ -10,17 +10,22 @@ whenever the demo corpus is re-crawled. Held in one file, every re-crawl
 produces a diff nobody can read, and the schema change hiding in it goes
 through unexamined.
 
-Restoring is the two files in order:
+Restoring is the two files in order, then one command to rebuild the vectors:
 
     psql "$ASKCONTENT_DATABASE_URL" -f sql/schema.sql
     psql "$ASKCONTENT_DATABASE_URL" -f sql/data.sql
+    python -m askcontent.cli reembed
+
+The third line is not optional. Until it has run the vector channel returns
+nothing and every answer comes from the lexical channel alone, which does not
+fail — it just quietly gets worse, which is the harder thing to notice.
 
 **What data.sql leaves out, and why it is safe to.**
 
 *Embeddings.* 3,000 vectors of 1,536 floats is about 59 MB of text — a file
 nobody will ever read, in a repository where every other file is meant to be
-read. They are derived from the chunks, which are here, so the restore path
-is `python -m askcontent.reindex` rather than a download.
+read. They are derived from the chunks, which are here, so the restore path is
+`python -m askcontent.cli reembed` rather than a download.
 
 *Operational history.* Jobs, retrieval runs, eval results, sessions. These
 describe things that happened to a particular database on a particular
@@ -83,7 +88,7 @@ TABLES = [
 #: Present in the schema and deliberately not dumped. Named here so the next
 #: person can see that the omission was decided rather than overlooked.
 SKIPPED = {
-    "embedding": "derived from document_chunk; ~59 MB of floats. Re-run the indexer.",
+    "embedding": "derived from document_chunk; ~59 MB of floats. Run: askcontent reembed",
     "job": "operational history of one database on one afternoon",
     "retrieval_run": "operational history",
     "retrieval_plan": "operational history",

@@ -324,16 +324,17 @@ class IndexingService:
             session.execute(text(f"""
                 INSERT INTO {S}.document_chunk (
                     org_id, connector_id, document_id, chunk_id, ordinal, text,
-                    heading_path, parent_text, page, is_table, is_code,
+                    heading_path, overlap, parent_text, page, is_table, is_code,
                     token_estimate, chunker_version
                 ) VALUES (
-                    :org, :c, :d, :cid, :ord, :text, :head, :parent, :page,
-                    :table, :code, :tokens, :cv
+                    :org, :c, :d, :cid, :ord, :text, :head, :overlap, :parent,
+                    :page, :table, :code, :tokens, :cv
                 )
             """), {
                 "org": self.org_id, "c": connector_id, "d": document_id,
                 "cid": chunk.chunk_id, "ord": chunk.ordinal, "text": chunk.text,
-                "head": list(chunk.heading_path), "parent": chunk.parent_text,
+                "head": list(chunk.heading_path), "overlap": chunk.overlap,
+                "parent": chunk.parent_text,
                 "page": chunk.page, "table": chunk.is_table, "code": chunk.is_code,
                 "tokens": max(1, len(chunk.text) // 4), "cv": CHUNKER_VERSION,
             })
@@ -363,7 +364,9 @@ class IndexingService:
             })
 
 
-def search_chunks(engine, connector_id, query_vector: list[float], k: int = 20) -> list[dict]:
+def search_chunks(
+    engine, connector_id, query_vector: list[float], k: int = 20, model_id: str | None = None
+) -> list[dict]:
     """kNN over our own chunks, through the same expression the index was built on.
 
     `vector_ops` owns that expression; if it ever needs a narrowing cast, both
@@ -382,7 +385,8 @@ def search_chunks(engine, connector_id, query_vector: list[float], k: int = 20) 
             JOIN {S}.document_chunk c ON c.chunk_id = e.ref_id
                                      AND c.connector_id = e.connector_id
             WHERE e.connector_id = :c AND e.kind = 'chunk'
+              AND (:model IS NULL OR e.model_id = :model)
             ORDER BY e.vector <=> CAST(:q AS vector)
             LIMIT :k
-        """), {"q": literal, "c": connector_id, "k": k}).mappings().all()
+        """), {"q": literal, "c": connector_id, "k": k, "model": model_id}).mappings().all()
     return [dict(r) for r in rows]

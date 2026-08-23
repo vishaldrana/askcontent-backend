@@ -3,6 +3,8 @@
     python -m askcontent.cli seed        register the fixture knowledgebases
                                          and connectors in the database
     python -m askcontent.cli index       build chunks and vectors (incremental)
+    python -m askcontent.cli reembed     rebuild vectors from stored chunks —
+                                         the step after loading sql/data.sql
     python -m askcontent.cli status      what is actually deployed
     python -m askcontent.cli ask "..."   one question, end to end
 """
@@ -81,6 +83,47 @@ def index(connector_id: str | None = None, limit: str | None = None) -> int:
         for note in report.notes[:3]:
             print("    note:", note)
     return 0
+
+
+def reembed(connector_id: str | None = None, scope: str | None = None) -> int:
+    """Rebuild vectors from the chunks already stored.
+
+        askcontent reembed                    every chunk missing one
+        askcontent reembed cn-qwary-help      one connector
+        askcontent reembed cn-qwary-help all  every chunk, not just the missing
+
+    The step after loading sql/data.sql, which carries the corpus and not its
+    vectors. Until this has run, the vector channel returns nothing and answers
+    come from the lexical channel alone — which does not fail, it just quietly
+    gets worse.
+    """
+    from .services.reembed import reembed as run
+
+    if connector_id in ("all", "--all"):
+        connector_id, scope = None, "all"
+
+    platform = build_postgres()
+    print(f"embedder: {platform.embedder.model_id} ({platform.embedder.dimension} dims)")
+
+    def progress(slug: str, done: int, total: int) -> None:
+        print(f"  {slug}: {done}/{total}", end="\r", flush=True)
+
+    report = run(
+        platform,
+        get_session_factory(),
+        platform.registry.org_id,
+        connector_id=connector_id,
+        all_chunks=scope in ("all", "--all"),
+        progress=progress,
+    )
+    print(" " * 40, end="\r")
+    print(report.line())
+    for error in report.errors[:5]:
+        print("  error:", error)
+    # A partial rebuild is a failure with output, not a success with warnings:
+    # the corpus it leaves behind answers some questions and not others, and
+    # nothing on screen afterwards would say which.
+    return 1 if report.errors else 0
 
 
 def status() -> int:
@@ -183,6 +226,8 @@ def main() -> int:
         return status()
     if command == "index":
         return index(*rest)
+    if command == "reembed":
+        return reembed(*rest)
     if command == "ask":
         return ask(*rest)
     if command == "evals":

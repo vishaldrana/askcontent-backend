@@ -144,7 +144,7 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     # and chunk each candidate from scratch.
     from .services.passages import StoredPassages
 
-    passages.stored = _StoredPassagesRouter(engine, sessions, org_id)
+    passages.stored = _StoredPassagesRouter(engine, sessions, org_id, embedder.model_id)
 
     return Platform(
         index=index, repository=repository, embedder=embedder, reranker=reranker,
@@ -161,10 +161,11 @@ class _StoredPassagesRouter:
     organisation, and the connector filter is applied in the query.
     """
 
-    def __init__(self, engine, sessions, org_id) -> None:
+    def __init__(self, engine, sessions, org_id, model_id: str) -> None:
         self._engine = engine
         self._sessions = sessions
         self._org = org_id
+        self._model = model_id
 
     #: The vector is joined in, not decoration. Without it every chunk arrives
     #: unembedded and passage selection re-embeds all of them at query time —
@@ -178,12 +179,22 @@ class _StoredPassagesRouter:
         d.doc_id, c.chunk_id, c.ordinal, c.text, c.heading_path,
         c.parent_text, c.page, c.is_table, e.vector
     """
+    #: Filtered to the *current* model, which is not fussiness.
+    #:
+    #: A deployment accumulates vectors from every embedder it has ever run —
+    #: this one still held 2,227 rows from the deterministic hashing stand-in
+    #: that preceded real embeddings. Without this clause the join binds
+    #: whichever row the planner reaches first, so a chunk could arrive
+    #: carrying a hashing-ngram vector to be compared against an
+    #: OpenAI-embedded question. Those live in unrelated spaces; the cosine
+    #: between them is noise, and noise that ranks.
     _JOIN = """
         JOIN {schema}.document d ON d.id = c.document_id
         LEFT JOIN {schema}.embedding e
                ON e.connector_id = c.connector_id
               AND e.kind = 'chunk'
               AND e.ref_id = c.chunk_id
+              AND e.model_id = :model
     """
 
     def _chunk(self, row):
@@ -214,7 +225,7 @@ class _StoredPassagesRouter:
                     ORDER BY c.ordinal
                     """
                 ),
-                {"org": self._org, "doc": doc_id},
+                {"org": self._org, "doc": doc_id, "model": self._model},
             ).mappings().all()
         if not rows:
             return None
@@ -247,7 +258,7 @@ class _StoredPassagesRouter:
                     ORDER BY d.doc_id, c.ordinal
                     """
                 ),
-                {"org": self._org, "docs": list(doc_ids)},
+                {"org": self._org, "docs": list(doc_ids), "model": self._model},
             ).mappings().all()
 
         out: dict[str, list] = {}
