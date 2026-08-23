@@ -27,6 +27,9 @@ class AnswerOutcome:
     #: Passage numbers the answer cited that were never offered to it. Always
     #: empty in practice; non-empty is a defect worth alerting on, not hiding.
     invented: tuple[int, ...] = ()
+    #: True when the answer rests, in part or whole, on what the host's page
+    #: is showing rather than on a document.
+    used_page: bool = False
     #: Set when the answerer itself failed — a timeout, a rate limit, an
     #: outage.
     #:
@@ -70,12 +73,23 @@ class AnsweringService:
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
         synonyms: dict[str, tuple[str, ...]] | None = None,
+        page=None,
     ) -> AsyncIterator[tuple[str, AnswerOutcome | None]]:
         """Yield `(text, None)` while writing, then one final `("", outcome)`."""
         passages = to_passages(citations)
+        has_page = page is not None and getattr(page, "usable", False)
 
+        # The page counts towards coverage, and it has to.
+        #
+        # The relevance gate exists to refuse questions the corpus does not
+        # cover. A question about the chart on the screen is exactly that kind
+        # of question, and refusing it while holding the answer in the request
+        # is the behaviour this whole feature exists to end. So the page's text
+        # is assessed alongside the passages: if the question is about neither,
+        # it is still refused.
         verdict = assess(
-            question, [p.text for p in passages],
+            question,
+            [p.text for p in passages] + ([page.render()] if has_page else []),
             floor=self._floor, synonyms=synonyms,
         )
         if not verdict.covered:
@@ -83,8 +97,9 @@ class AnsweringService:
             # it declines would be paying for a judgement already made, and
             # would fail open if the model were unavailable.
             message = (
-                "I could not find anything in this knowledgebase that answers "
-                "that question."
+                "I could not find anything in this knowledgebase"
+                + (" or on this page" if has_page else "")
+                + " that answers that question."
             )
             for word in message.split(" "):
                 yield word + " ", None
@@ -97,7 +112,7 @@ class AnsweringService:
 
         async for chunk in self.answerer.stream(
             question=question, passages=passages, history=history,
-            instructions=instructions,
+            instructions=instructions, page=page if has_page else None,
         ):
             if chunk.text:
                 said += chunk.text
@@ -110,14 +125,26 @@ class AnsweringService:
                 # be followed back to a document, which is the entire promise.
                 # Checked here rather than asked for in the prompt, because a
                 # rule the model can quietly stop following is not a rule.
-                uncited = bool(said.strip()) and not chunk.cited
+                # `[page]` counts as attribution, but only when a page was
+                # actually supplied. An answer claiming to quote a page that
+                # was never sent is inventing a source, which is the same
+                # defect as citing passage 9 of 4 and is treated the same way.
+                page_claimed = chunk.used_page and has_page
+                fabricated_page = chunk.used_page and not has_page
+                uncited = bool(said.strip()) and not chunk.cited and not page_claimed
                 outcome = AnswerOutcome(
-                    supported=chunk.supported and not invented and not uncited,
+                    supported=(
+                        chunk.supported and not invented and not uncited
+                        and not fabricated_page
+                    ),
                     cited=chunk.cited,
                     invented=invented,
+                    used_page=page_claimed,
                     reason=(
-                        "the answer cited none of the passages, so none of it "
-                        "can be checked"
+                        "the answer attributed something to a page that was "
+                        "never supplied"
+                        if fabricated_page else
+                        "the answer cited nothing, so none of it can be checked"
                         if uncited else None
                     ),
                 )

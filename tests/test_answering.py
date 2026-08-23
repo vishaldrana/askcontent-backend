@@ -121,4 +121,4 @@ def test_an_answer_that_cites_nothing_is_not_grounded():
         AnsweringService(Uncited()), "What does Terminate do to respondents?", CITATIONS
     )
     assert not outcome.supported
-    assert "cited none" in outcome.reason
+    assert "cited nothing" in outcome.reason

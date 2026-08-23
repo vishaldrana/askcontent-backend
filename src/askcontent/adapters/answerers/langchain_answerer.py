@@ -22,6 +22,10 @@ from .prompt import render, system_prompt
 #: The model's contract for "the passages do not answer this". Recognised here
 #: rather than shown to the reader: it is a protocol token, not prose.
 _NOT_IN_CORPUS = re.compile(r"^\s*NOT_IN_CORPUS\s*:\s*", re.I)
+#: `[page]`, the marker for the page the reader is on. Deliberately a word
+#: rather than a number, so it can never collide with a passage number and a
+#: reader can tell the two apart in the prose without a legend.
+_PAGE_CITATION = re.compile(r"\[page\]", re.IGNORECASE)
 _CITATION = re.compile(r"\[(\d+)\]")
 
 #: Long enough to contain the marker, short enough that the reader does not
@@ -82,6 +86,7 @@ class LangChainAnswerer(Answerer):
         passages: Sequence[Passage],
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
+        page=None,
     ) -> AsyncIterator[AnswerChunk]:
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -97,7 +102,7 @@ class LangChainAnswerer(Answerer):
 
         messages = [
             SystemMessage(content=system_prompt(instructions)),
-            HumanMessage(content=render(question, passages, history)),
+            HumanMessage(content=render(question, passages, history, page)),
         ]
 
         buffered = ""
@@ -136,7 +141,10 @@ class LangChainAnswerer(Answerer):
             yield AnswerChunk(text=buffered)
 
         cited = tuple(sorted({int(n) for n in _CITATION.findall(buffered)}))
-        yield AnswerChunk(done=True, supported=True, cited=cited, usage=usage)
+        yield AnswerChunk(
+            done=True, supported=True, cited=cited,
+            used_page=bool(_PAGE_CITATION.search(buffered)), usage=usage,
+        )
 
 
 def _text_of(piece: Any) -> str:

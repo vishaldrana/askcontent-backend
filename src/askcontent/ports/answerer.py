@@ -65,6 +65,10 @@ class AnswerChunk:
     supported: bool = True
     #: Passage numbers the finished answer actually cited.
     cited: tuple[int, ...] = ()
+    #: Whether the answer attributed anything to the page the reader is on.
+    #: Separate from `cited` because it is a different kind of support: a
+    #: passage can be opened and checked, a page cannot.
+    used_page: bool = False
     usage: dict = field(default_factory=dict)
 
 
@@ -79,6 +83,7 @@ class Answerer(Protocol):
         passages: Sequence[Passage],
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
+        page: object | None = None,
     ) -> AsyncIterator[AnswerChunk]:
         """Stream a grounded answer.
 
@@ -90,5 +95,10 @@ class Answerer(Protocol):
         that "and what about Texas?" resolves. It is context for understanding
         the *question* — it is never a source of facts, because a claim whose
         support has scrolled out of the evidence panel is unattributable.
+
+        `page` is a `PageContext` when the host told us what its page is
+        showing. It is a source, unlike history — but a different kind from a
+        passage, and it is attributed `[page]` so a reader can tell "your
+        documentation says" from "the screen in front of you says".
         """
         ...

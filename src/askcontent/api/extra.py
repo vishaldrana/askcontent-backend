@@ -1521,7 +1521,8 @@ def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
     return [f"This answer cites '{oldest.title}', which has no recorded date."]
 
 
-def _run_answer(platform, question, citations, history, instructions="", synonyms=None):
+def _run_answer(platform, question, citations, history, instructions="", synonyms=None,
+                page=None):
     """Drive the async answerer from this synchronous stream.
 
     The endpoint is a sync generator because the retrieval pipeline is
@@ -1541,7 +1542,7 @@ def _run_answer(platform, question, citations, history, instructions="", synonym
     async def pump():
         try:
             async for item in platform.answering.stream(
-                question, citations, history, instructions, synonyms
+                question, citations, history, instructions, synonyms, page
             ):
                 outbox.put(item)
         except Exception as exc:  # noqa: BLE001

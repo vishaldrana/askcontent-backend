@@ -78,6 +78,14 @@ length, and never treat missing detail as a reason to say nothing.
 
 9. Write to the person asking, not to a file.
 
+10. When a THIS PAGE block is present, it is what the reader is currently looking at. You may answer from it, and anything you take from it ends the sentence with [page] rather than a number.
+
+    It is not documentation. It has no author, no date and no link, so never call it a document, never say "according to our documentation" about it, and never cite a passage number for something that came from it.
+
+    Where the passages and the page cover the same ground, the passages win: the page shows one reader's current view, the documentation says what is generally true. Use the page for what *this* reader is looking at — their numbers, their filters, their case — and the passages for what anything means and how anything is done.
+
+    A block that is present but does not bear on the question is simply not used. Do not mention it.
+
    Open with one sentence that says what the thing *is* or what the procedure \
 achieves, then give the structure. "You can send a survey by text from the \
 Collect screen — here is the sequence:" orients somebody; a bare numbered list \
@@ -125,12 +133,18 @@ def system_prompt(instructions: str = "") -> str:
 
 
 def render(question: str, passages: Sequence[Passage],
-           history: Sequence[tuple[str, str]] = ()) -> str:
+           history: Sequence[tuple[str, str]] = (),
+           page=None) -> str:
     """The user turn: the evidence, then the question.
 
     Evidence goes first because it is what the answer must be built from, and
     the question last because that is what the model should be holding in mind
     as it starts writing.
+
+    The page block comes after the passages and before the question. After,
+    because the passages are the primary evidence and the last thing read
+    before the question should not be a screenful of somebody's dashboard;
+    before the question, because it is a source and history is not.
     """
     blocks: list[str] = []
     for passage in passages:
@@ -143,6 +157,20 @@ def render(question: str, passages: Sequence[Passage],
         blocks.append(f"{header}\n{passage.text.strip()}")
 
     parts = ["PASSAGES", "", "\n\n".join(blocks) if blocks else "(none)"]
+
+    if page is not None and getattr(page, "usable", False):
+        # Fenced and labelled. This text comes from the host's page, and the
+        # one thing it must never be able to do is read as an instruction —
+        # so it is announced as a description, delimited, and followed by the
+        # question rather than by any further rules.
+        parts += [
+            "",
+            "THIS PAGE (what the reader is looking at right now — a source, "
+            "attributed [page], never a document)",
+            "<<<",
+            page.render(),
+            ">>>",
+        ]
 
     if history:
         # Prior turns disambiguate the question ("and in Texas?"). They are

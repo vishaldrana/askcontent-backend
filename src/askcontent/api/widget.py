@@ -221,6 +221,13 @@ async def widget_ask(
     if not question:
         raise HTTPException(400, "no question")
 
+    # What the host says its page is showing. Bounded on the way in, because
+    # this is text from somebody else's page arriving in our prompt, and it
+    # arrives on every question.
+    from ..domain.page_context import from_payload
+
+    page = from_payload(body.get("context"))
+
     if not x_askcontent_key:
         raise HTTPException(404, "This assistant is not configured on this page.")
 
@@ -275,7 +282,11 @@ async def widget_ask(
             # Same routing as the console. "What can you help with" is the
             # first thing a visitor types into a widget, and a refusal there
             # is the whole product's first impression.
-            about = _answer_about_the_corpus(slug, question)
+            # Skipped when the host has told us what its page shows: "what is
+            # this?" is a question about the screen then, not about the
+            # collection, and answering with a description of the corpus is a
+            # confident non-answer.
+            about = None if page is not None else _answer_about_the_corpus(slug, question)
             if about is not None:
                 yield step("Described the collection", started)
                 yield _frame("token", about)
@@ -307,7 +318,7 @@ async def widget_ask(
             outcome = None
             for chunk, result in _run_answer(
                 platform, question, evidence.citations, (),
-                _instructions_for(slug), evidence.trace.synonyms,
+                _instructions_for(slug), evidence.trace.synonyms, page,
             ):
                 if result is not None:
                     outcome = result
@@ -317,6 +328,10 @@ async def widget_ask(
             yield step("Composed the answer", answer_at)
 
             payload = evidence.model_dump(mode="json")
+            # Reported so the widget can say where the answer came from. A
+            # sentence marked [page] is not backed by anything a reader can
+            # open, and the interface has to be able to say so.
+            payload["used_page"] = bool(outcome is not None and outcome.used_page)
             if outcome is not None and not outcome.supported:
                 # Nothing supported the answer, so nothing may be shown as
                 # supporting it — and the widget refuses to render prose with

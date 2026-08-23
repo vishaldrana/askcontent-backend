@@ -66,6 +66,11 @@ class ExtractiveAnswerer(Answerer):
         passages: Sequence[Passage],
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
+        # Accepted and ignored. This answerer quotes passages verbatim, and a
+        # page summary is not a passage — there is nothing here it could quote
+        # without inventing the attribution. The offline fallback answering
+        # from documents only is the right degradation.
+        page=None,
     ) -> AsyncIterator[AnswerChunk]:
         asked = _terms(question)
         if not passages or not asked:

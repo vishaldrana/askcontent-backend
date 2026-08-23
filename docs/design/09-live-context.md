@@ -1,6 +1,6 @@
 # 09 · Live context — answering about the page, not just the corpus
 
-**Status**: design, not built.
+**Status**: step 1 built (page context). Steps 2–5 designed, not built.
 **Supersedes**: nothing. **Depends on**: 03 (retrieval), the answerer port, the widget contract.
 
 ---
@@ -259,10 +259,16 @@ to test the *shape* of the behaviour rather than the value:
 Each step is useful shipped alone, which is the test of whether the order is
 right.
 
-1. **Page context** — the widget passes `context.summary` (host-supplied text,
-   capped, escaped), the answerer receives it as a distinct labelled block, and
-   answers may use it with `[page]` attribution. No configuration, no HTTP, no
-   new failure mode. Covers "what am I looking at".
+1. ~~**Page context**~~ — **built**. The widget passes `context` (title,
+   summary, key), bounded by `domain/page_context.py`; the answerer receives it
+   as a labelled block after the passages; answers attribute it `[page]` and
+   the widget renders that as an unclickable "this page" chip with a line
+   saying part of the answer came from the screen. The relevance gate counts
+   the page towards coverage, so a question about the chart is no longer
+   refused — and a question about neither still is, naming both: *"I could not
+   find anything in this knowledgebase or on this page."* An answer claiming
+   `[page]` when no page was supplied is unsupported, the same treatment as
+   citing a passage number that was never offered.
 2. **The `Datapoint` type and its rendering** — with a stub source, in the
    console's Diagnose screen only. Proves the evidence model before anything
    calls out.
