@@ -29,6 +29,7 @@ from ..domain.documents import (
 )
 from ..domain.ids import plan_hash
 from ..domain.retrieval_spec import Channel, RetrievalSpec
+from ..domain.role_rules import decide as role_decide
 from ..domain.scope import ExclusionRule, KnowledgeScope, evaluate
 from ..ports.content_index import IndexFilters, IndexUnavailable
 from ..ports.content_repository import RepositoryUnavailable, ResolutionOutcome
@@ -158,7 +159,8 @@ class RetrievalService:
     # -- the pipeline ------------------------------------------------------
 
     def retrieve(
-        self, connector: Connector, spec: RetrievalSpec, principal: str
+        self, connector: Connector, spec: RetrievalSpec, principal: str,
+        role_rules: tuple = (),
     ) -> Evidence:
         started = time.perf_counter()
         config = connector.retrieval
@@ -213,8 +215,20 @@ class RetrievalService:
             metadata = self._resolve(
                 connector, doc_id, principal, candidate, trace, batch.get(doc_id)
             )
-            if metadata is not None:
-                resolved.append((metadata, candidate))
+            if metadata is None:
+                continue
+            # The role's own narrowing, applied here rather than after ranking:
+            # a document excluded post-hoc has already influenced the order and
+            # occupied the k budget (CNT-SCP-14).
+            verdict = role_decide(
+                role_rules, space=metadata.space,
+                labels=tuple(metadata.labels or ()),
+            )
+            if not verdict.allowed:
+                candidate.dropped_by = "role_rule"
+                candidate.drop_detail = verdict.reason
+                continue
+            resolved.append((metadata, candidate))
 
         if not resolved:
             trace.candidates = tuple(candidates.values())

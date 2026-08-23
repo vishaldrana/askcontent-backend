@@ -741,6 +741,93 @@ def delete_role(slug: str, role_id: str) -> dict:
     return {"deleted": role_id}
 
 
+class LabelRule(BaseModel):
+    #: One of the two is set. A rule on a space covers everything in it; a rule
+    #: on a label covers whatever carries it, wherever it lives.
+    space: str | None = None
+    label: str | None = None
+    effect: str = "deny"
+
+
+class LabelRules(BaseModel):
+    rules: list[LabelRule] = []
+
+
+@router.put("/api/connectors/{slug}/roles/{role_id}/rules")
+def set_label_rules(slug: str, role_id: str, body: LabelRules) -> dict:
+    """Narrow a role below the connector's own scope.
+
+    The connector scope says what the *corpus* is. These say what a particular
+    role may see of it — the content analogue of askdb's column rules, and the
+    reason a single connector can serve two audiences without duplicating the
+    knowledgebase.
+
+    Replaced wholesale rather than patched. A partial update of an access rule
+    set is how a deny survives the removal of the thing it was denying.
+    """
+    for rule in body.rules:
+        if not rule.space and not rule.label:
+            raise HTTPException(400, "a rule must name a space or a label")
+        if rule.effect not in ("allow", "deny"):
+            raise HTTPException(400, f"unknown effect {rule.effect}")
+
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        owned = session.execute(text(
+            f"SELECT 1 FROM {S}.rbac_role WHERE id = :r AND connector_id = :c"
+        ), {"r": role_id, "c": cid}).scalar_one_or_none()
+        if not owned:
+            raise HTTPException(404, "no such role on this connector")
+
+        session.execute(text(
+            f"DELETE FROM {S}.rbac_label_rule WHERE role_id = :r"
+        ), {"r": role_id})
+        for rule in body.rules:
+            session.execute(text(f"""
+                INSERT INTO {S}.rbac_label_rule (org_id, role_id, space, label, effect)
+                VALUES (:o, :r, :s, :l, :e)
+            """), {
+                "o": _org(session), "r": role_id, "s": rule.space,
+                "l": rule.label, "e": rule.effect,
+            })
+        # Any access change bumps the policy version, so a cached projection is
+        # invalidated without an explicit purge.
+        session.execute(text(
+            f"UPDATE {S}.connector SET policy_version = policy_version + 1 WHERE id = :c"
+        ), {"c": cid})
+        session.commit()
+    return {"role_id": role_id, "rules": len(body.rules)}
+
+
+@router.get("/api/connectors/{slug}/facets")
+def scope_facets(slug: str) -> dict:
+    """The spaces and labels actually present in this connector's corpus.
+
+    Offered so that an access rule is chosen from what exists rather than typed
+    from memory. A deny on a label nobody uses is a rule that looks like
+    protection and is not.
+    """
+    from ..services.retrieval import scope_population
+
+    platform = _platform()
+    connector = platform.registry.get(slug)
+    population = scope_population(platform.index, connector)
+
+    spaces: dict[str, int] = {}
+    labels: dict[str, int] = {}
+    for meta in population:
+        if meta.space:
+            spaces[meta.space] = spaces.get(meta.space, 0) + 1
+        for label in meta.labels or ():
+            labels[label] = labels.get(label, 0) + 1
+
+    return {
+        "documents": len(population),
+        "spaces": [{"value": k, "documents": v} for k, v in sorted(spaces.items())],
+        "labels": [{"value": k, "documents": v} for k, v in sorted(labels.items())],
+    }
+
+
 @router.get("/api/connectors/{slug}/roles/{role_id}/effective")
 def effective_access(slug: str, role_id: str) -> dict:
     """What this role can actually reach, computed rather than asserted.
@@ -748,6 +835,8 @@ def effective_access(slug: str, role_id: str) -> dict:
     An access screen that lists grants tells you what was configured. This tells
     you what it *means*, which is the only version anybody can act on.
     """
+    from ..domain.role_rules import RoleRule
+    from ..domain.role_rules import decide as role_decide
     from ..domain.scope import evaluate
     from ..services.retrieval import scope_population
 
@@ -760,6 +849,12 @@ def effective_access(slug: str, role_id: str) -> dict:
         name = session.execute(text(
             f"SELECT name FROM {S}.rbac_role WHERE id = :r"
         ), {"r": role_id}).scalar_one_or_none()
+        rules = tuple(
+            RoleRule(effect=r["effect"], space=r["space"], label=r["label"])
+            for r in session.execute(text(
+                f"SELECT effect, space, label FROM {S}.rbac_label_rule WHERE role_id = :r"
+            ), {"r": role_id}).mappings().all()
+        )
 
     connector = platform.registry.get(slug)
     population = scope_population(platform.index, connector)
@@ -769,18 +864,48 @@ def effective_access(slug: str, role_id: str) -> dict:
     from ..ports.content_repository import ResolutionOutcome
 
     in_scope = [m for m in population if evaluate(connector.scope, m).in_scope]
+
+    # The role's own rules first: they are decided locally and cost nothing,
+    # and they are the same predicate the retrieval gate applies. A screen that
+    # reimplemented this would eventually disagree with the gate, and the
+    # disagreement would surface as an answer citing a document the screen
+    # swore was hidden.
+    narrowed, by_rule = [], []
+    for meta in in_scope:
+        verdict = role_decide(
+            rules, space=meta.space, labels=tuple(meta.labels or ())
+        )
+        (narrowed if verdict.allowed else by_rule).append((meta, verdict.reason))
+
+    # The store is asked only about what survived, and only up to a bound:
+    # each authorize is a round trip, and 200 of them made this screen take
+    # eleven seconds to answer a question about configuration.
+    SAMPLE = 60
     readable, forbidden = [], []
-    for meta in in_scope[:200]:
+    for meta, _why in narrowed[:SAMPLE]:
         outcome = platform.repository.authorize(
             principal, DocRef(doc_id=meta.doc_id, kb_id=meta.kb_id)
         )
         (readable if outcome is ResolutionOutcome.RESOLVED else forbidden).append(meta.title)
 
+    checked = min(len(narrowed), SAMPLE)
     return {
         "role": name, "principals": principals, "principal_used": principal,
-        "in_scope": len(in_scope), "readable": len(readable),
-        "forbidden": len(forbidden), "forbidden_sample": forbidden[:8],
-        "note": "Computed against the store for the first 200 in-scope documents.",
+        "in_scope": len(in_scope),
+        "allowed_by_rules": len(narrowed),
+        "blocked_by_rules": len(by_rule),
+        "blocked_sample": [
+            {"title": m.title, "reason": why} for m, why in by_rule[:8]
+        ],
+        "readable": len(readable),
+        "forbidden": len(forbidden),
+        "forbidden_sample": forbidden[:8],
+        "checked": checked,
+        "note": (
+            f"{len(by_rule)} of {len(in_scope)} in-scope documents are excluded by this "
+            f"role's rules. Store permissions were checked on {checked} of the "
+            f"{len(narrowed)} that remain."
+        ),
     }
 
 
@@ -1115,6 +1240,31 @@ def _principal_for_role(slug: str, role: str | None) -> str:
     return row or f"role:{role}"
 
 
+def _rules_for_role(slug: str, role: str | None) -> tuple:
+    """The narrowing a role carries, as the retrieval gate wants it.
+
+    Loaded per question rather than cached on the connector, so that removing a
+    role's access takes effect on the next query rather than whenever something
+    happens to invalidate a cache. Narrowing that waits is narrowing that
+    leaked.
+    """
+    from ..domain.role_rules import RoleRule
+
+    if not role:
+        return ()
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        rows = session.execute(text(f"""
+            SELECT lr.effect, lr.space, lr.label
+            FROM {S}.rbac_label_rule lr
+            JOIN {S}.rbac_role r ON r.id = lr.role_id
+            WHERE r.connector_id = :c AND r.name = :n
+        """), {"c": cid, "n": role}).mappings().all()
+    return tuple(
+        RoleRule(effect=r["effect"], space=r["space"], label=r["label"]) for r in rows
+    )
+
+
 @router.post("/api/chat/stream")
 def chat_stream(body: AskStream):
     """The answer stream.
@@ -1161,7 +1311,11 @@ def chat_stream(body: AskStream):
             for name, label in stages[:2]:
                 yield _sse({"type": "tool_start", "name": name, "label": label})
 
-            evidence = platform.retrieval.retrieve(connector, spec, principal)
+            evidence = platform.retrieval.retrieve(
+                connector, spec, principal, role_rules=_rules_for_role(
+                    body.connector_id, body.role
+                ),
+            )
             trace = evidence.trace
 
             yield _sse({"type": "tool_end", "name": "compile", "label": stages[0][1],
