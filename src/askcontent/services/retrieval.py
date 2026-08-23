@@ -459,7 +459,31 @@ class RetrievalService:
         per_document: dict[str, int] = {}
         seen_texts: set[str] = set()
 
-        for rank, result in enumerate(ranked, start=1):
+        # The reranker scores a passage in isolation; it has no idea which
+        # document the passage came from or how the two channels ranked that
+        # document. Ordering on its score alone throws away the strongest
+        # signal available — that both the index and the store independently
+        # put one document first — and lets a long, keyword-dense passage from
+        # an unrelated page outrank the page that actually answers the
+        # question.
+        #
+        # So the two orderings are fused, by rank, the same way the channels
+        # were: reciprocal ranks added, never raw scores compared. The floor
+        # below is still applied to the reranker's own score, so "nothing
+        # cleared the bar" remains a refusal rather than a reordering.
+        k = config.rrf_constant
+        ordered = sorted(
+            enumerate(ranked, start=1),
+            key=lambda pair: -(
+                1.0 / (k + pair[0])
+                + 1.0 / (k + (
+                    candidates[passage_pool[pair[1].index][2].doc_id].fusion_rank
+                    or len(candidates)
+                ))
+            ),
+        )
+
+        for rank, result in ordered:
             if result.score < config.rerank_floor:
                 continue
             if len(citations) >= config.context_budget_chunks:
@@ -517,6 +541,34 @@ class RetrievalService:
                 f"{oldest.updated_at:%d %b %Y}" if oldest.updated_at else
                 f"Best supporting evidence includes '{oldest.title}', which has no recorded date"
             )
+        # Documents withheld for age are the dangerous silent case. If the
+        # freshness policy archived a candidate that *outranked* everything
+        # cited, the reader is being answered from worse sources and has no way
+        # to tell — which is precisely the "confidently wrong" failure this
+        # system exists to prevent. Say so, and name the best one withheld.
+        archived = [
+            c for c in candidates.values()
+            if c.dropped_by == "archive_tier" and c.fusion_rank
+        ]
+        if archived:
+            best_kept = min(
+                (c.fusion_rank for c in candidates.values()
+                 if c.dropped_by is None and c.fusion_rank),
+                default=None,
+            )
+            best_withheld = min(archived, key=lambda c: c.fusion_rank)
+            outranked = best_kept is None or best_withheld.fusion_rank < best_kept
+            notices.append(
+                f"{len(archived)} matching document(s) were withheld as archived by the "
+                f"freshness policy (older than {config.freshness.expired_days} days)"
+                + (
+                    f" — including the closest match to this question. Raise the "
+                    f"connector's expiry window, or pin the document, if this corpus "
+                    f"is documentation that stays correct as it ages."
+                    if outranked else "."
+                )
+            )
+
         unknown = [c for c in citations if c.staleness is Staleness.UNKNOWN_AGE]
         if unknown:
             notices.append(

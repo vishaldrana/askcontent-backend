@@ -1012,10 +1012,62 @@ def get_settings(slug: str) -> dict:
 class AskStream(BaseModel):
     connector_id: str
     question: str
+    #: Prior turns in this thread, oldest first. Used to resolve what a
+    #: follow-up refers to — never as a source of facts.
+    history: list[dict] = []
     #: A **role**, not a person. Access is defined by roles on the Access
     #: screen; asking as an ad-hoc principal would let the console invent an
     #: identity the platform never granted.
     role: str | None = None
+
+
+def _run_answer(platform, question, citations, history):
+    """Drive the async answerer from this synchronous stream.
+
+    The endpoint is a sync generator because the retrieval pipeline is
+    synchronous and blocking; the answerer is async because streaming an HTTP
+    response body is. Rather than convert one to the other, the async
+    generator is pumped on a private loop in a worker thread and its chunks
+    handed back through a queue — so tokens still reach the client as they
+    are produced, not in one batch at the end.
+    """
+    import asyncio
+    import queue
+    import threading
+
+    outbox: queue.Queue = queue.Queue()
+    _END = object()
+
+    async def pump():
+        try:
+            async for item in platform.answering.stream(question, citations, history):
+                outbox.put(item)
+        except Exception as exc:  # noqa: BLE001
+            outbox.put(("", _AnswerFailure(str(exc))))
+        finally:
+            outbox.put(_END)
+
+    thread = threading.Thread(target=lambda: asyncio.run(pump()), daemon=True)
+    thread.start()
+
+    while True:
+        item = outbox.get()
+        if item is _END:
+            return
+        yield item
+
+
+class _AnswerFailure:
+    """An answerer that raised. Reported as an unsupported answer rather than a
+    500: the retrieval work is still valid and the evidence is still worth
+    showing."""
+
+    supported = False
+    cited: tuple[int, ...] = ()
+    invented: tuple[int, ...] = ()
+
+    def __init__(self, message: str) -> None:
+        self.reason = f"the answerer failed: {message}"
 
 
 def _sse(payload: dict) -> str:
@@ -1107,10 +1159,54 @@ def chat_stream(body: AskStream):
                 yield _sse({"type": "tool_end", "name": name, "label": label,
                             "status": "ok", "detail": detail})
 
-            for line in _compose(evidence):
-                yield _sse({"type": "token", "text": line})
+            # ⑦ answer ------------------------------------------------------
+            # The relevance gate runs first and can refuse without calling the
+            # answerer at all; see domain/groundedness.py for why that decision
+            # is made here rather than left to the model.
+            yield _sse({"type": "tool_start", "name": "answer",
+                        "label": "Composing a grounded answer"})
 
-            yield _sse({"type": "complete", **evidence.model_dump(mode="json")})
+            history = [
+                (turn.get("question", ""), turn.get("answer", ""))
+                for turn in body.history
+                if turn.get("question")
+            ]
+            outcome = None
+            for text, result in _run_answer(
+                platform, body.question, evidence.citations, history
+            ):
+                if result is not None:
+                    outcome = result
+                elif text:
+                    yield _sse({"type": "token", "text": text})
+
+            answerer = platform.answering.answerer
+            yield _sse({
+                "type": "tool_end", "name": "answer",
+                "label": "Composing a grounded answer",
+                "status": "ok" if (outcome and outcome.supported) else "warn",
+                "detail": (
+                    f"{answerer.name} · "
+                    + (f"cited {len(outcome.cited)} of {len(evidence.citations)}"
+                       if outcome and outcome.supported
+                       else (outcome.reason if outcome and outcome.reason
+                             else "not answerable from this corpus"))
+                ),
+            })
+
+            payload = evidence.model_dump(mode="json")
+            if outcome is not None and not outcome.supported:
+                # Nothing supported the answer, so nothing may be shown as
+                # supporting it. Leaving the passages on screen under an "I
+                # don't know" is what makes a refusal look like a bug.
+                payload["citations"] = []
+                payload["unsupported_reason"] = outcome.reason
+            payload["answered_by"] = {
+                "provider": answerer.name, "model": answerer.model_id,
+                "grounded": bool(outcome and outcome.supported),
+                "cited": list(outcome.cited) if outcome else [],
+            }
+            yield _sse({"type": "complete", **payload})
             elapsed = (dt.datetime.now() - started).total_seconds() * 1000
             yield _sse({"type": "timing", "elapsed_ms": round(elapsed)})
             yield _sse({"type": "done"})

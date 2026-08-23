@@ -14,7 +14,9 @@ from .adapters.embedders.hashing import HashingEmbedder
 from .adapters.index.mock_pgp import MockPgpIndex
 from .adapters.repository.mock_ecm import MockEcmRepository
 from .adapters.rerankers.lexical import LexicalReranker
-from .domain.catalog import AuthorityRule
+from .adapters.answerers import build_answerer
+from .domain.catalog import AuthorityRule, FreshnessPolicy
+from .services.answering import AnsweringService
 from .domain.documents import AuthorityTier, Sensitivity
 from .domain.scope import KnowledgeScope, SourceRoot
 from .services.mapping import Coercion, FieldRule, suggest_map
@@ -93,6 +95,7 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     return Platform(
         index=index, repository=repository, embedder=embedder, reranker=reranker,
         passages=passages, retrieval=retrieval, registry=registry,
+        answering=AnsweringService(build_answerer()),
     )
 
 
@@ -166,6 +169,7 @@ class Platform:
     passages: PassageService
     retrieval: RetrievalService
     registry: Registry
+    answering: AnsweringService
 
 
 def build(*, simulate_latency: bool = True, failure_rate: float = 0.0) -> Platform:
@@ -184,6 +188,7 @@ def build(*, simulate_latency: bool = True, failure_rate: float = 0.0) -> Platfo
         reranker=reranker,
         passages=passages,
         retrieval=retrieval,
+        answering=AnsweringService(build_answerer()),
         registry=registry,
     )
     _seed_connectors(platform)
@@ -301,6 +306,14 @@ def _seed_connectors(platform: Platform) -> None:
             groups=("group:all-staff",),
             ceiling=Sensitivity.PUBLIC,
             authority=(),
+            # Reference documentation ages differently from a policy library.
+            # A page describing how to add a hyperlink was written once and is
+            # still correct; the default three-year expiry archived 32 of 34
+            # candidates for one question and answered from the two survivors,
+            # which is worse than saying nothing. Ageing still flags them.
+            retrieval={"freshness": FreshnessPolicy(
+                ageing_days=540, stale_days=1095, expired_days=3650
+            )},
             state=ConnectorState.ACTIVE,
         ),
         dict(
@@ -343,7 +356,7 @@ def _seed_connectors(platform: Platform) -> None:
                     sensitivity_ceiling=seed["ceiling"],
                 ),
                 access=AccessBinding(groups=seed["groups"]),
-                retrieval=config(),
+                retrieval=config(**seed.get("retrieval", {})),
                 authority_rules=seed["authority"],
                 state=seed["state"],
             ),

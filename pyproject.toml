@@ -23,6 +23,8 @@ dependencies = [
 pdf = ["pypdfium2>=4.30", "docling>=2.7"]
 ocr = ["rapidocr-onnxruntime>=1.3"]
 rerank = ["sentence-transformers>=3.2"]
+# The answerer. Absent, the console falls back to extractive answers and says so.
+llm = ["anthropic>=0.40"]
 
 [build-system]
 requires = ["hatchling"]
