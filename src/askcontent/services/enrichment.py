@@ -20,6 +20,7 @@ from sqlalchemy import text
 from ..config import settings
 from ..domain.dates import DateSource, resolve_dates, summarise
 from ..domain.documents import DocRef
+from ..domain.fingerprint import compare, content_fingerprint, structure_fingerprint
 from ..domain.ids import file_hash
 
 S = settings.db_schema
@@ -106,11 +107,15 @@ class EnrichmentService:
         meta = resolution.metadata
         body = ""
         content_hash = None
+        structure_hash = None
         try:
             raw = self.platform.repository.fetch(ref, "service")
-            content_hash = file_hash(raw.blob)
             parsed = parse_document(doc_id, raw.blob, declared_mime=raw.mime, sandbox=False)
             body = parsed.full_text()
+            # The *semantic* hash, not the byte hash. A re-save must not read as
+            # a change on the review screen any more than it does in the indexer.
+            content_hash = content_fingerprint(parsed.blocks)
+            structure_hash = structure_fingerprint(parsed.blocks)
         except Exception:  # noqa: BLE001
             # Metadata without content is still worth having; the description
             # and any content-derived date simply stay empty.
@@ -140,6 +145,7 @@ class EnrichmentService:
             "usource": str(updated.source),
             "evidence": updated.evidence or created.evidence,
             "hash": content_hash,
+            "structure": structure_hash,
         }
 
     def check_for_updates(self, slug: str, limit: int = 500) -> dict:
@@ -158,7 +164,7 @@ class EnrichmentService:
                 raise KeyError(slug)
 
             members = session.execute(text(f"""
-                SELECT doc_id, kb_id, content_hash, source_updated_at
+                SELECT doc_id, kb_id, content_hash, structure_hash, source_updated_at
                 FROM {S}.collection_member
                 WHERE collection_id = :c AND state <> 'removed'
                 ORDER BY last_checked_at NULLS FIRST LIMIT :n
@@ -181,14 +187,20 @@ class EnrichmentService:
                     """), {"c": collection["id"], "d": member["doc_id"]})
                     continue
 
-                changed = (
-                    member["content_hash"] is not None
-                    and detail["hash"] is not None
-                    and member["content_hash"] != detail["hash"]
+                result = compare(
+                    old_file=None, new_file="",
+                    old_content=member["content_hash"],
+                    new_content=detail["hash"] or "",
+                    old_structure=member["structure_hash"],
+                    new_structure=detail["structure"],
+                    old_text=None, new_text=None,
                 )
-                if changed:
+                verdict = str(result.verdict)
+                if result.needs_reindex and member["content_hash"] is not None:
                     report["changed"] += 1
                     report["changed_docs"].append(member["doc_id"])
+                elif verdict == "cosmetic":
+                    report["cosmetic"] = report.get("cosmetic", 0) + 1
                 else:
                     report["unchanged"] += 1
 
@@ -200,13 +212,21 @@ class EnrichmentService:
                         source_created_at = :created, source_updated_at = :updated,
                         created_source = :csource, updated_source = :usource,
                         date_evidence = :evidence, content_hash = CAST(:hash AS varchar),
+                        structure_hash = :structure,
+                        last_verdict = :verdict,
                         missing_since = NULL,
                         last_changed_at = CASE
                             WHEN content_hash IS DISTINCT FROM CAST(:hash AS varchar)
                             THEN now() ELSE last_changed_at END,
                         last_checked_at = now()
                     WHERE collection_id = :c AND doc_id = :d
-                """), {"c": collection["id"], "d": member["doc_id"], **detail})
+                """), {"c": collection["id"], "d": member["doc_id"],
+                       "verdict": verdict, **detail})
 
             session.commit()
+            report["summary"] = (
+                f"checked {report['checked']}, {report['changed']} changed, "
+                f"{report.get('cosmetic', 0)} cosmetic-only, "
+                f"{report['unchanged']} unchanged, {report['gone']} gone"
+            )
             return report

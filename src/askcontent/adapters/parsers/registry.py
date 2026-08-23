@@ -26,6 +26,17 @@ SUPPORTED_MIMES = ("application/pdf", "text/html")
 _PARSERS = (HtmlParser(), PdfParser())
 
 
+def parser_version_for_content(blob: bytes, declared_mime: str | None = None) -> str:
+    """The parser version that *would* handle this content.
+
+    Sniffs, because the declared type is routinely wrong — the stub content
+    manager reports `application/octet-stream` for everything, and comparing
+    against that resolved to "no parser" and quietly disabled the
+    cosmetic-change optimisation it was feeding.
+    """
+    return parser_version_for(sniff(blob, declared_mime))
+
+
 def parser_version_for(mime: str) -> str:
     """The version the current parser would stamp on this content type.
 

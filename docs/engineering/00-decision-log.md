@@ -515,3 +515,67 @@ and `test_the_services_layer_imports_no_adapter` failed on the next run. The
 registry now exposes `parser_version_for`, and the boundary holds: the façade is
 the seam, and reaching past it is the vendor-isolation break the test exists to
 catch.
+
+---
+
+## 2026-08-22 · A byte hash is not a change detector
+
+`file_hash` answers "are these the same bytes", which is not the question. A
+re-save, a reflowed paragraph, a wiki that smartens quotes on save — each
+changes every byte and none changes what the document says. Detecting those as
+changes re-parses and re-embeds a corpus for nothing, and it makes the word
+*changed* on a review screen mean nothing, which is the more expensive loss.
+
+### Three fingerprints, three questions
+
+| Hash | Question | Buys |
+|---|---|---|
+| `file_hash` | Same bytes? | Skip the parse |
+| `content_hash` | Same words? | Skip the re-chunk and re-embed |
+| `structure_hash` | Same layout? | Tell *reordered* from *rewritten* |
+
+`content_hash` is computed from the **parsed, normalised** text, so it is also
+stable across a change of source format: the same policy exported to HTML and to
+PDF fingerprints identically.
+
+Normalisation folds NFKC, zero-width characters, curly quotes, en and em dashes,
+non-breaking spaces, and runs of whitespace. **Case is kept** — in policy text
+"MUST" and "must" are not the same word, and a normaliser that lowercased would
+hide the one edit most worth noticing.
+
+Content is hashed **order-independently** and order lives in the structure hash.
+That separation is what makes *reordered* reachable at all, and the two are
+genuinely different: reordering needs a re-chunk, because heading paths and
+adjacency move, but the words are already known to be correct.
+
+### Measured
+
+| Change | Verdict | Re-embed |
+|---|---|---|
+| Reflow, blank lines, indentation | cosmetic | no |
+| Curly quotes, em dashes, non-breaking spaces | cosmetic | no |
+| Paragraphs swapped | reordered | yes |
+| `5:00 PM` → `4:00 PM` | changed (83% shared) | yes |
+
+On the live corpus: a re-save touching all 13 pages of the engineering space
+produced **13 cosmetic-only, 0 chunks, 0 embeddings**. A subsequent real edit to
+one page produced **1 parsed, 12 unchanged, 11 chunks re-embedded**.
+
+Similarity is a shingled Jaccard over normalised tokens, with the window scaled
+down for short documents — at a 5-token window a single figure change in a short
+paragraph scored 57%, which reads as a rewrite and is not one.
+
+### The bug that disabled it silently
+
+The first live run reported **zero** cosmetic skips despite matching
+fingerprints. The version guard compared against the *declared* content type,
+and the content manager reports `application/octet-stream` for everything — so
+"which parser handles this" resolved to *none*, the guard never passed, and the
+optimisation it gated never ran.
+
+The parser is chosen by **sniffing**, so the comparison has to sniff too.
+`parser_version_for_content` does, and the same run then reported 13 of 13
+skipped.
+
+The general lesson is the one this codebase keeps relearning: a declared content
+type is a hint. Anywhere it is trusted, it eventually decides something.

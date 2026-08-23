@@ -27,9 +27,10 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import text
 
-from ..adapters.parsers.registry import parse_document, parser_version_for
+from ..adapters.parsers.registry import parse_document, parser_version_for_content
 from ..domain.chunks import CHUNKER_VERSION, chunk_document
 from ..domain.documents import DocMetadata, DocRef, ParseHints
+from ..domain.fingerprint import compare, content_fingerprint, structure_fingerprint
 from ..domain.ids import file_hash, text_hash
 from ..domain.scope import evaluate
 from ..db.models import VECTOR_WIDTH
@@ -48,6 +49,7 @@ class IndexReport:
     seen: int = 0
     parsed: int = 0
     skipped_unchanged: int = 0
+    skipped_cosmetic: int = 0
     refused: int = 0
     out_of_scope: int = 0
     unreadable: int = 0
@@ -59,8 +61,9 @@ class IndexReport:
     def line(self) -> str:
         return (
             f"{self.connector}: {self.parsed} parsed, {self.skipped_unchanged} unchanged, "
-            f"{self.chunks} chunks, {self.embedded} embedded "
-            f"({self.embeddings_reused} reused), {self.refused} refused"
+            f"{self.skipped_cosmetic} cosmetic-only, {self.chunks} chunks, "
+            f"{self.embedded} embedded ({self.embeddings_reused} reused), "
+            f"{self.refused} refused"
         )
 
 
@@ -109,6 +112,7 @@ class IndexingService:
                 row.doc_id: row
                 for row in session.execute(text(f"""
                     SELECT d.doc_id, d.text_hash, d.file_hash, d.parser_version,
+                           d.content_hash, d.structure_hash,
                            EXISTS (
                                SELECT 1 FROM {S}.document_chunk c
                                WHERE c.document_id = d.id
@@ -145,7 +149,7 @@ class IndexingService:
                 pipeline_current = (
                     prior is not None
                     and prior.chunks_current
-                    and prior.parser_version == parser_version_for(raw.mime)
+                    and prior.parser_version == parser_version_for_content(raw.blob, raw.mime)
                 )
                 if prior is not None and prior.file_hash == fhash and pipeline_current:
                     report.skipped_unchanged += 1
@@ -162,13 +166,34 @@ class IndexingService:
                               parsed.parser_version, CHUNKER_VERSION)
                     if not parsed.refused else None
                 )
+                chash = content_fingerprint(parsed.blocks) if not parsed.refused else None
+                shash = structure_fingerprint(parsed.blocks) if not parsed.refused else None
+
+                # The bytes moved. Did the document?
+                verdict = compare(
+                    old_file=prior.file_hash if prior else None,
+                    new_file=fhash,
+                    old_content=prior.content_hash if prior else None,
+                    new_content=chash or "",
+                    old_structure=prior.structure_hash if prior else None,
+                    new_structure=shash,
+                )
 
                 document_id = self._upsert_document(
-                    session, connector_id, meta, raw, parsed, fhash, thash, connector
+                    session, connector_id, meta, raw, parsed, fhash, thash,
+                    connector, chash, shash, verdict,
                 )
 
                 if parsed.refused:
                     report.refused += 1
+                    continue
+
+                # Cosmetic changes are recorded and then dropped: the words are
+                # identical, so every chunk and every vector is still correct.
+                # This is where the saving is — a re-save of a large document
+                # used to cost a full re-parse and re-embed.
+                if pipeline_current and not verdict.needs_reindex:
+                    report.skipped_cosmetic += 1
                     continue
 
                 # The text hash covers parser and chunker versions, so an
@@ -194,7 +219,8 @@ class IndexingService:
     # -- writes ------------------------------------------------------------
 
     def _upsert_document(self, session, connector_id, meta: DocMetadata, raw, parsed,
-                         fhash, thash, connector=None):
+                         fhash, thash, connector=None, chash=None, shash=None,
+                         verdict=None):
         """Write the document *and* its catalog entry.
 
         Classification, authority and staleness are computed here rather than at
@@ -221,12 +247,17 @@ class IndexingService:
                 parser_id, parser_version, parse_path, parse_quality,
                 refusal_reason, extras, doc_type, doc_type_confidence,
                 doc_type_source, doc_type_evidence, authority, authority_reason,
-                staleness, in_scope, last_seen_at
+                staleness, content_hash, structure_hash,
+                last_content_change_at, last_cosmetic_change_at,
+                in_scope, last_seen_at
             ) VALUES (
                 :org, :c, :doc, :title, :url, :path, :space, :owner,
                 :labels, :ver, :updated, :sens, :acl, :mime, :size, :fh, :th,
                 :pid, :pv, :pp, :pq, :rr, :extras, :dtype, :dconf,
                 :dsource, :devidence, :authority, :areason, :staleness,
+                :chash, :shash,
+                CASE WHEN :content_moved THEN now() END,
+                CASE WHEN :cosmetic THEN now() END,
                 true, now()
             )
             ON CONFLICT (connector_id, doc_id) DO UPDATE SET
@@ -248,6 +279,12 @@ class IndexingService:
                 authority = EXCLUDED.authority,
                 authority_reason = EXCLUDED.authority_reason,
                 staleness = EXCLUDED.staleness,
+                content_hash = EXCLUDED.content_hash,
+                structure_hash = EXCLUDED.structure_hash,
+                last_content_change_at = CASE WHEN :content_moved THEN now()
+                    ELSE {S}.document.last_content_change_at END,
+                last_cosmetic_change_at = CASE WHEN :cosmetic THEN now()
+                    ELSE {S}.document.last_cosmetic_change_at END,
                 in_scope = true, missing_since = NULL, last_seen_at = now()
             RETURNING id
         """), {
@@ -271,6 +308,9 @@ class IndexingService:
             "authority": str(tier),
             "areason": reason,
             "staleness": str(state),
+            "chash": chash, "shash": shash,
+            "content_moved": bool(verdict and verdict.verdict in ("changed", "reordered")),
+            "cosmetic": bool(verdict and verdict.verdict == "cosmetic"),
         }).scalar_one()
 
     def _replace_chunks(self, session, connector_id, document_id, chunks) -> None:
