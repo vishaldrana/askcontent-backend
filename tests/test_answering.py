@@ -101,3 +101,24 @@ def test_passage_numbers_are_the_contract_with_the_evidence_panel():
     passages = to_passages(CITATIONS)
     assert [p.number for p in passages] == [1, 2]
     assert passages[0].title == "Terminate"
+
+
+def test_an_answer_that_cites_nothing_is_not_grounded():
+    """It may even be correct — the one that prompted this check was — but
+    nothing in it can be followed back to a document, which is the whole
+    promise. Checked here rather than asked for in the prompt, because a rule
+    the model can quietly stop following is not a rule."""
+
+    class Uncited:
+        name = "uncited"
+        model_id = "v0"
+
+        async def stream(self, **_):
+            yield AnswerChunk(text="Terminate ends a survey for some respondents.")
+            yield AnswerChunk(done=True, supported=True, cited=())
+
+    _text, outcome = _drain(
+        AnsweringService(Uncited()), "What does Terminate do to respondents?", CITATIONS
+    )
+    assert not outcome.supported
+    assert "cited none" in outcome.reason

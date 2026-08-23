@@ -234,9 +234,18 @@ class CrawlPlanner:
             "phase": "load", "total": total, "processed": len(pending),
             **counts,
             "elapsed_s": round(time.monotonic() - started, 1),
+            # "0 loaded of 114 planned" reads as a failure when in fact
+            # nothing was pending: the load only takes pages in `planned` or
+            # `failed`, and a collection already loaded has none. Saying so is
+            # the difference between "the crawler is broken" and "there was
+            # nothing to do".
             "summary": (
+                f"nothing pending — all {total} pages are already loaded; "
+                f"use Check for updates to re-examine them"
+                if not pending else
                 f"{counts['loaded']} loaded, {counts['unchanged']} unchanged, "
-                f"{counts['failed']} failed of {total} planned"
+                f"{counts['failed']} failed of {len(pending)} pending "
+                f"({total} in the collection)"
             ),
         }
 

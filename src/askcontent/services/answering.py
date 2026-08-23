@@ -93,19 +93,33 @@ class AnsweringService:
 
         offered = {p.number for p in passages}
         outcome: AnswerOutcome | None = None
+        said = ""
 
         async for chunk in self.answerer.stream(
             question=question, passages=passages, history=history,
             instructions=instructions,
         ):
             if chunk.text:
+                said += chunk.text
                 yield chunk.text, None
             if chunk.done:
                 invented = tuple(sorted(set(chunk.cited) - offered))
+                # An answer with prose and no citations at all is not a
+                # grounded answer, whatever it claims. It may even be correct —
+                # the one that prompted this check was — but nothing in it can
+                # be followed back to a document, which is the entire promise.
+                # Checked here rather than asked for in the prompt, because a
+                # rule the model can quietly stop following is not a rule.
+                uncited = bool(said.strip()) and not chunk.cited
                 outcome = AnswerOutcome(
-                    supported=chunk.supported and not invented,
+                    supported=chunk.supported and not invented and not uncited,
                     cited=chunk.cited,
                     invented=invented,
+                    reason=(
+                        "the answer cited none of the passages, so none of it "
+                        "can be checked"
+                        if uncited else None
+                    ),
                 )
 
         yield "", outcome or AnswerOutcome(supported=False, reason="answerer produced nothing")
