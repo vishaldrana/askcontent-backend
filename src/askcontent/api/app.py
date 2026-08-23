@@ -10,8 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from ..adapters.parsers.registry import capabilities
@@ -41,12 +40,53 @@ def _platform() -> Platform:
 platform: Platform = _platform()
 
 app = FastAPI(title="askcontent", version="0.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+#: Two audiences, two policies, and one middleware chain to serve them.
+#:
+#: The console is ours and is called from origins we list. The widget is called
+#: from customer domains nobody knows at build time — that is the point of it.
+#: `CORSMiddleware` answers preflights itself and wraps mounted applications,
+#: so a mount cannot carry a looser policy than its parent; the parent replies
+#: first and the sub-application's rules never run.
+#:
+#: Rather than loosen the console's policy to accommodate the widget, the
+#: policy is chosen by path. The widget's own protection is not CORS anyway:
+#: it is the per-embed origin allowlist, checked on every request, which
+#: refuses with an explanation a developer can act on instead of the browser's
+#: opaque "Failed to fetch".
+WIDGET_PREFIX = "/api/widget"
+CONSOLE_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
+WIDGET_HEADERS = "content-type, authorization, x-askcontent-key"
+
+
+@app.middleware("http")
+async def cors_by_audience(request: Request, call_next):
+    origin = request.headers.get("origin")
+    widget = request.url.path.startswith(WIDGET_PREFIX)
+
+    if request.method == "OPTIONS" and origin:
+        allowed = origin if widget else (origin if origin in CONSOLE_ORIGINS else None)
+        if allowed is None:
+            return Response(status_code=403)
+        return Response(
+            status_code=204,
+            headers={
+                "access-control-allow-origin": allowed,
+                "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                "access-control-allow-headers": (
+                    WIDGET_HEADERS if widget else request.headers.get(
+                        "access-control-request-headers", "*"
+                    )
+                ),
+                "access-control-max-age": "600",
+                "vary": "Origin",
+            },
+        )
+
+    response = await call_next(request)
+    if origin and (widget or origin in CONSOLE_ORIGINS):
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["vary"] = "Origin"
+    return response
 
 
 # ---------------------------------------------------------------- discovery
@@ -55,6 +95,48 @@ app.add_middleware(
 from .extra import router as extra_router  # noqa: E402
 
 app.include_router(extra_router)
+
+from .widget import router as widget_router  # noqa: E402
+
+app.include_router(widget_router, prefix="/api/widget")
+
+
+@app.get("/widget/embed.js")
+def widget_bundle():
+    """Serve the built widget.
+
+    The install snippet points here, so the bundle has to be reachable from
+    wherever the API is — and in most deployments that is the only host the
+    embedding page is already allowed to talk to. A CDN is better and is a
+    deployment decision; this is what makes the snippet on the Embeds screen
+    true out of the box rather than aspirational.
+    """
+    import pathlib
+
+    from fastapi.responses import FileResponse, JSONResponse
+
+    for candidate in (
+        pathlib.Path(__file__).resolve().parents[3] / "widget" / "embed.js",
+        pathlib.Path.home() / "IdeaProjects" / "askcontent-widget" / "dist" / "embed.js",
+    ):
+        if candidate.is_file():
+            return FileResponse(
+                candidate,
+                media_type="application/javascript",
+                headers={
+                    # The bundle is versioned by deployment, not by URL, so it
+                    # must not be cached for long — a stale widget talking to a
+                    # new API is a bug nobody can reproduce.
+                    "cache-control": "public, max-age=300",
+                    # The whole point is being loaded by another origin.
+                    "access-control-allow-origin": "*",
+                },
+            )
+
+    return JSONResponse(
+        {"detail": "the widget bundle is not built; run `npm run build` in askcontent-widget"},
+        status_code=404,
+    )
 
 
 @app.get("/api/health")
