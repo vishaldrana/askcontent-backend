@@ -1063,7 +1063,8 @@ def list_embeds(slug: str) -> list[dict]:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rows = session.execute(text(f"""
-            SELECT id, name, publishable_key, allowed_origins, is_active, created_at
+            SELECT id, name, publishable_key, allowed_origins, is_active,
+                   appearance, session_count, last_used_at, created_at
             FROM {S}.embed WHERE connector_id = :c ORDER BY created_at DESC
         """), {"c": cid}).mappings().all()
         return [dict(r) | {"id": str(r["id"])} for r in rows]
@@ -1084,6 +1085,142 @@ def create_embed(slug: str, body: EmbedCreate) -> dict:
                "orig": body.allowed_origins}).scalar_one()
         session.commit()
     return {"id": str(rid), "name": body.name, "publishable_key": key}
+
+
+class EmbedPatch(BaseModel):
+    name: str | None = None
+    allowed_origins: list[str] | None = None
+    is_active: bool | None = None
+    appearance: dict | None = None
+
+
+@router.patch("/api/connectors/{slug}/embeds/{embed_id}")
+def update_embed(slug: str, embed_id: str, body: EmbedPatch) -> dict:
+    """Everything about an embed except its key.
+
+    The key is never rotated in place. A rotation that keeps the same row is
+    indistinguishable, from the pages that carry it, from an outage — so
+    replacing a key means creating a second embed, moving the pages, and then
+    deleting the first, which is a sequence somebody can carry out safely.
+    """
+    if body.allowed_origins is not None:
+        for origin in body.allowed_origins:
+            if not origin.startswith(("http://", "https://")):
+                raise HTTPException(
+                    400,
+                    f"'{origin}' is not an origin. An origin is scheme and host "
+                    f"with no path, for example https://intranet.example.com",
+                )
+            if origin.rstrip("/").count("/") > 2:
+                raise HTTPException(
+                    400, f"'{origin}' has a path; an origin has none",
+                )
+
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        row = session.execute(text(f"""
+            UPDATE {S}.embed SET
+                name = coalesce(:n, name),
+                allowed_origins = coalesce(:orig, allowed_origins),
+                is_active = coalesce(:act, is_active),
+                appearance = coalesce(CAST(:app AS jsonb), appearance),
+                updated_at = now()
+            WHERE id = CAST(:e AS uuid) AND connector_id = :c
+            RETURNING id, name, publishable_key, allowed_origins, is_active,
+                      appearance, session_count, last_used_at, created_at
+        """), {
+            "e": embed_id, "c": cid, "n": body.name,
+            "orig": body.allowed_origins, "act": body.is_active,
+            "app": json.dumps(body.appearance) if body.appearance is not None else None,
+        }).mappings().one_or_none()
+        if row is None:
+            raise HTTPException(404, "no such embed on this connector")
+        session.commit()
+        return dict(row) | {"id": str(row["id"])}
+
+
+@router.get("/api/connectors/{slug}/embeds/{embed_id}/snippet")
+def embed_snippet(slug: str, embed_id: str, base: str | None = None) -> dict:
+    """The code to paste, generated rather than documented.
+
+    A snippet in a README drifts from the product the first time an option is
+    renamed. Generating it from the row means the thing on screen is the thing
+    that works, including this embed's own key and appearance.
+    """
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        row = session.execute(text(f"""
+            SELECT publishable_key, appearance FROM {S}.embed
+            WHERE id = CAST(:e AS uuid) AND connector_id = :c
+        """), {"e": embed_id, "c": cid}).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(404, "no such embed on this connector")
+
+    key = row["publishable_key"]
+    look = row["appearance"] or {}
+    origin = (base or "https://api.example.com").rstrip("/")
+
+    chosen = [
+        (name, value)
+        for name, value in (
+            ("title", look.get("title")),
+            ("placeholder", look.get("placeholder")),
+            ("position", look.get("position")),
+            ("size", look.get("size")),
+            ("theme", look.get("theme")),
+        )
+        if value
+    ]
+    # `ensure_ascii=False` because these strings are shown to a person and
+    # pasted into a page. An ellipsis rendered as \u2026 in a snippet is a
+    # snippet that looks broken before it has run.
+    options = "".join(
+        f"\n    {name}: {json.dumps(value, ensure_ascii=False)},"
+        for name, value in chosen
+    )
+    # JSX takes attributes, not object entries. Generating one string for both
+    # produced a React example that could not compile.
+    jsx_props = "".join(
+        f"\n      {name}={json.dumps(value, ensure_ascii=False)}"
+        for name, value in chosen
+    )
+
+    script = f"""<script>
+  (function (w, d) {{
+    w.askcontent = w.askcontent || function () {{ (w.askcontent.q = w.askcontent.q || []).push(arguments) }};
+    var s = d.createElement('script');
+    s.src = '{origin}/widget/embed.js'; s.async = true;
+    d.head.appendChild(s);
+  }})(window, document);
+
+  askcontent('init', {{
+    key: '{key}',
+    baseUrl: '{origin}',{options}
+    // Identity is required and there is no anonymous mode: an assistant that
+    // does not know who is asking cannot honour "no answer cites a document
+    // the asker cannot open". Mint this token on your server.
+    user: {{ id: CURRENT_USER_ID, token: CURRENT_USER_TOKEN }},
+  }});
+</script>"""
+
+    react = f"""import {{ AskContent }} from '@askcontent/widget/react'
+
+export function Assistant({{ user }}) {{
+  return (
+    <AskContent
+      publicKey="{key}"
+      baseUrl="{origin}"{jsx_props}
+      user={{{{ id: user.id, token: user.assistantToken }}}}
+    />
+  )
+}}"""
+
+    return {
+        "snippet": script,
+        "react_package": "@askcontent/widget",
+        "react_snippet": react,
+        "publishable_key": key,
+    }
 
 
 @router.delete("/api/connectors/{slug}/embeds/{embed_id}")
