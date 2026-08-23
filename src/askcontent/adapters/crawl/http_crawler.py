@@ -174,13 +174,18 @@ class HttpCrawler:
             result.notes.append("robots.txt disallows the root URL")
             return result
 
-        urls = self._from_sitemaps(root, result)
-        if urls:
-            result.urls = self._filter(urls, root)
-        else:
+        urls = self._filter(self._from_sitemaps(root, result), root)
+        if not urls:
+            # A sitemap that declares nothing under this root is the same
+            # situation as no sitemap at all. It used to be treated as an
+            # answer — "the site has no pages here" — which is how a help
+            # centre with thousands of pages came back empty.
             result.source = "links"
-            result.notes.append("no sitemap found; crawling links instead")
-            result.urls = self._filter(self._from_links(root, result), root)
+            result.notes.append(
+                "the sitemap declared nothing under this address; following links instead"
+            )
+            urls = self._filter(self._from_links(root, result), root)
+        result.urls = urls
 
         if len(result.urls) > self.policy.max_pages:
             result.capped = True
@@ -207,15 +212,33 @@ class HttpCrawler:
         return ordered
 
     def _from_sitemaps(self, root: str, result: Discovery) -> list[str]:  # noqa: C901
+        """Every page the site's own sitemaps declare, under this root.
+
+        Two rules that look like details and are not, both learned from
+        wellsfargo.com/help/: its sitemap index points at
+        `locations.wellsfargo.com`, whose sitemap lists 10,001 branch
+        locations. Collected wholesale and filtered at the end, those 10,001
+        out-of-scope URLs *were* the discovery — the help pages never got
+        looked at, and the crawl reported "0 pages planned from the sitemap"
+        over a site with thousands of them.
+
+        So: a sitemap on another host describes another site and is not
+        followed, and pages are filtered as they are read rather than at the
+        end, so the budget is spent on URLs that are actually in scope.
+        """
         found: list[str] = []
         queue = self._sitemap_candidates(root)
         seen: set[str] = set()
+        root_host = urlsplit(root).netloc
 
         while queue and len(found) < self.policy.max_pages * 4:
             candidate = queue.pop(0)
             if candidate in seen:
                 continue
             seen.add(candidate)
+            if self.policy.same_host_only and urlsplit(candidate).netloc != root_host:
+                result.notes.append(f"skipped {candidate}: a different host")
+                continue
             fetched = self.fetch(candidate)
             if not fetched.ok:
                 continue
@@ -237,11 +260,34 @@ class HttpCrawler:
             if not locations:
                 continue
 
-            result.notes.append(f"{candidate} listed {len(locations)} entries")
+            kept = 0
             for location in locations:
                 # A sitemap index points at sitemaps; a sitemap points at pages.
-                (queue if location.endswith(".xml") else found).append(location)
+                if location.endswith(".xml"):
+                    queue.append(location)
+                    continue
+                # Filtered here rather than at the end. One irrelevant sitemap
+                # must not be able to spend the whole budget.
+                if self._in_scope(location, root):
+                    found.append(location)
+                    kept += 1
+            result.notes.append(
+                f"{candidate} listed {len(locations)} entries"
+                + (f", {kept} under the root" if kept != len(locations) else "")
+            )
         return found
+
+    def _in_scope(self, url: str, root: str) -> bool:
+        """Cheap prefix and host test, before anything is fetched.
+
+        Deliberately not the full `_filter`: that one asks robots.txt about
+        every URL, and asking ten thousand times to discard ten thousand
+        results is the slow way to learn they were out of scope.
+        """
+        clean = url.split("#")[0].rstrip("/")
+        if self.policy.same_host_only and urlsplit(clean).netloc != urlsplit(root).netloc:
+            return False
+        return clean.startswith(root.rstrip("/"))
 
     def _from_links(self, root: str, result: Discovery) -> list[str]:
         found: list[str] = [root]

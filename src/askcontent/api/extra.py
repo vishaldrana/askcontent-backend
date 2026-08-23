@@ -139,6 +139,12 @@ def _collection_row(session, slug: str):
 def add_rule(slug: str, body: RuleCreate) -> dict:
     if body.kind not in RULE_KINDS:
         raise HTTPException(400, f"unknown rule kind {body.kind}")
+
+    if body.kind == "crawl" and not (body.config or {}).get("root"):
+        # Refused rather than accepted-and-ignored. A crawl rule with no root
+        # is what the generic value box used to produce, and it materialised to
+        # nothing while looking exactly like a rule that had run.
+        raise HTTPException(400, "a crawl needs a root URL, for example https://help.example.com/")
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         ordinal = session.execute(text(
@@ -158,6 +164,53 @@ def add_rule(slug: str, body: RuleCreate) -> dict:
     # parses every member, which is not a thing to do inside an HTTP request.
     from ..worker import enqueue
 
+    if body.kind == "crawl":
+        # A crawl does not materialise from the index — there is nothing in the
+        # index yet, which is the whole reason somebody chose it. It plans the
+        # site, then loads it, then publishes what it loaded. Wiring this to
+        # `materialise` is how a crawl rule came to sit in a knowledgebase
+        # having done nothing at all.
+        config = body.config or {}
+        job = enqueue(
+            _sessions(), _org_of(), "collection.crawl_plan",
+            collection_id=collection["id"],
+            payload={
+                "collection": slug,
+                "root": config["root"],
+                "max_pages": int(config.get("max_pages", 500)),
+                "include": list(config.get("include", ())),
+                "exclude": list(config.get("exclude", ())),
+            },
+        )
+        return {
+            "id": str(rid), "ordinal": ordinal, "enumerable": True, "job_id": job,
+            "note": "Crawling. Pages are fetched, parsed and published as they "
+                    "load, so the corpus is answerable as soon as it finishes.",
+        }
+
+    note = ("Queued. The worker materialises the collection, then enriches "
+            "each member with its title, description and dates.")
+
+    if body.kind == "url_list":
+        # Resolved now, so a paste that matched nothing says so while the person
+        # who pasted it is still looking at the screen. This is the failure that
+        # produced an empty knowledgebase and no explanation: every link was to
+        # a public website, and `url_list` resolves against the index and
+        # fetches nothing.
+        from ..services.url_resolution import UrlResolutionService
+
+        summary = UrlResolutionService(_platform().index).resolve_text(
+            (body.config or {}).get("text", "")
+        )
+        if summary.results and not summary.resolved:
+            note = (
+                f"None of these {len(summary.results)} link"
+                f"{'' if len(summary.results) == 1 else 's'} are in the index. "
+                "Pasting links resolves them to documents already indexed — it "
+                "never downloads anything. For a site the index does not reach, "
+                "add it as a crawl instead."
+            )
+
     job = enqueue(
         _sessions(), _org_of(), "collection.materialise",
         collection_id=collection["id"], payload={"collection": slug},
@@ -166,8 +219,7 @@ def add_rule(slug: str, body: RuleCreate) -> dict:
         "id": str(rid), "ordinal": ordinal,
         "enumerable": body.kind in ENUMERABLE_KINDS,
         "job_id": job,
-        "note": "Queued. The worker materialises the collection, then enriches "
-                "each member with its title, description and dates.",
+        "note": note,
     }
 
 
@@ -208,7 +260,8 @@ def materialise(slug: str, body: Materialise) -> dict:
         per_rule: list[dict] = []
 
         for rule in rules:
-            hits, capped = _evaluate(platform, rule)
+            hits, capped = _evaluate(platform, rule, session=session,
+                                     collection_id=collection["id"])
             per_rule.append({
                 "rule_id": str(rule["id"]), "kind": rule["kind"],
                 "effect": rule["effect"], "enumerable": rule["enumerable"],
@@ -304,7 +357,7 @@ def materialise(slug: str, body: Materialise) -> dict:
         return result
 
 
-def _evaluate(platform, rule) -> tuple[list[dict], bool]:
+def _evaluate(platform, rule, *, session=None, collection_id=None) -> tuple[list[dict], bool]:
     """Turn one rule into candidates.
 
     Every branch is bounded, and a rule that hits its cap **says so** rather
@@ -314,6 +367,27 @@ def _evaluate(platform, rule) -> tuple[list[dict], bool]:
     config = rule["config"] or {}
     kind = rule["kind"]
     cap = int(config.get("max", 2000))
+
+    if kind == "crawl":
+        # A crawl is not an enumeration of the index — it is the thing that put
+        # the pages there. The crawler writes members as it goes, so this rule's
+        # candidates are what it already produced.
+        #
+        # Returning nothing here, which is what this did, meant re-materialising
+        # a crawled knowledgebase proposed removing every page in it: a dry run
+        # on the 114-page help corpus said "remove 113". The rule looked
+        # unimplemented and was in fact destructive.
+        if session is None or collection_id is None:
+            return [], False
+        rows = session.execute(text(f"""
+            SELECT doc_id, kb_id, title, url
+              FROM {S}.collection_member
+             WHERE collection_id = :c
+               AND state <> 'removed'
+               AND :rule = ANY(contributed_by)
+             LIMIT :cap
+        """), {"c": collection_id, "rule": str(rule["id"]), "cap": cap}).mappings().all()
+        return [dict(r) for r in rows], len(rows) >= cap
 
     if kind == "pgp_knowledgebase":
         page = platform.index.list_documents(config["kb_id"], page_size=cap)
@@ -429,8 +503,8 @@ def _evaluate(platform, rule) -> tuple[list[dict], bool]:
         # Uploads land through the upload endpoint; the rule records the batch.
         return [], False
 
-    # similar_to, link_expansion and crawl are specified and not yet built. An
-    # empty result with the rule visible is honest; a fabricated one is not.
+    # similar_to and link_expansion are specified and not yet built. An empty
+    # result with the rule visible is honest; a fabricated one is not.
     return [], False
 
 
