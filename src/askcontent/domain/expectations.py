@@ -17,6 +17,11 @@ Five kinds, and each exists because a real failure needed it:
                      see a ranking regression that keeps the right document in
                      the evidence and pushes it down — which is precisely what
                      a reranker change does when it goes wrong
+    cites_something  at least one citation, without saying which. For questions
+                     where several documents would be a fair answer and the
+                     thing worth asserting is that the answer rests on
+                     *anything* — an answer that cites nothing may be correct
+                     and is still unverifiable
     says             an exact string must appear — for figures, thresholds and
                      dates, where a paraphrase is a wrong answer
     does_not_say     for the specific wrong answer somebody has already given
@@ -34,7 +39,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-KINDS = ("answers", "refuses", "cites", "cites_first", "says", "does_not_say")
+KINDS = ("answers", "refuses", "cites", "cites_first", "cites_something",
+         "says", "does_not_say")
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,7 @@ class Expectation:
             "refuses": "refuses to answer",
             "cites": f"cites “{self.value}”",
             "cites_first": f"cites “{self.value}” first",
+            "cites_something": "cites at least one source",
             "says": f"says “{self.value}”",
             "does_not_say": f"does not say “{self.value}”",
         }.get(self.kind, f"{self.kind} {self.value}")
@@ -103,6 +110,12 @@ def check(expectations: list[Expectation], outcome: Outcome) -> list[str]:
             elif _loose(value) not in _loose(outcome.cited[0]):
                 failures.append(
                     f"cited “{outcome.cited[0]}” first, not “{value}”"
+                )
+
+        elif kind == "cites_something":
+            if not outcome.cited:
+                failures.append(
+                    "answered but cited nothing, so none of it can be checked"
                 )
 
         elif kind == "says":

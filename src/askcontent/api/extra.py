@@ -2420,6 +2420,8 @@ def list_cases(slug: str) -> dict:
             {"value": "answers", "label": "Answers the question"},
             {"value": "refuses", "label": "Refuses to answer"},
             {"value": "cites", "label": "Cites a document"},
+            {"value": "cites_first", "label": "Cites a document first"},
+            {"value": "cites_something", "label": "Cites at least one source"},
             {"value": "says", "label": "Says exactly"},
             {"value": "does_not_say", "label": "Does not say"},
         ],

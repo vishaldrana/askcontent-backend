@@ -75,3 +75,18 @@ def test_cites_first_sees_a_ranking_regression_that_cites_alone_misses():
 
 def test_cites_first_on_a_refusal_says_so_plainly():
     assert check([Expectation("cites_first", "Anything")], refused())
+
+
+def test_cites_something_names_the_actual_problem():
+    """An answer that cites nothing may be perfectly correct and is still
+    unverifiable. Reported as "answered but cited nothing" rather than as a
+    refusal, which is what `answers` alone would have implied."""
+    uncited = Outcome(answer="Qwary is an experience platform.", grounded=False, cited=())
+    failures = check([Expectation("cites_something")], uncited)
+    assert failures and "cited nothing" in failures[0]
+
+
+def test_cites_something_passes_whichever_source_was_used():
+    """For questions where several documents would be a fair answer, the thing
+    worth asserting is that the answer rests on anything at all."""
+    assert not check([Expectation("cites_something")], answered(cited=("Anything",)))

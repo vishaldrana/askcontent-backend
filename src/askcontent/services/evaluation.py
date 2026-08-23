@@ -132,6 +132,12 @@ class EvaluationService:
                 if 1 <= n <= len(evidence.citations)
             ]
 
+            # "refused, but this question should be answerable" is wrong when
+            # the answer was written and simply carried no citations. The
+            # reason the answering layer already recorded is more accurate
+            # than anything inferred from `grounded` alone.
+            reason = getattr(outcome, "reason", None) if outcome else None
+
             failures = (
                 [f"the answerer failed: {outcome.error}"]
                 if errored
@@ -140,6 +146,8 @@ class EvaluationService:
                     Outcome(answer=answer.strip(), grounded=grounded, cited=tuple(cited)),
                 )
             )
+            if failures and reason and not grounded and answer.strip():
+                failures = [f"{f} ({reason})" for f in failures]
             results.append(
                 CaseResult(
                     case_id=case["id"], question=case["question"],
