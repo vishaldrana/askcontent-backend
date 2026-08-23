@@ -58,6 +58,11 @@ def build_reranker(embedder=None):
 
             model = os.environ.get("ASKCONTENT_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
             logger.info("reranker: cross-encoder %s", model)
+            # Installing the runtime is enough to select this path, so the
+            # model has to be present too — otherwise `auto` silently starts a
+            # multi-gigabyte download inside somebody's first question, which
+            # is the failure the adapter's own deployment note warns about.
+            # Better to say so at boot than to hang at request time.
             return CrossEncoderReranker(model)
         except ImportError:
             if choice == "cross-encoder":
