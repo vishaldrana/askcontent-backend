@@ -49,7 +49,12 @@ class EvaluationService:
         self.org_id = org_id
 
     def run(self, slug: str, *, case_ids: list[str] | None = None) -> dict:
-        from ..api.extra import _instructions_for, _rules_for_role, _run_answer
+        from ..api.extra import (
+            _glossary_for,
+            _instructions_for,
+            _rules_for_role,
+            _run_answer,
+        )
 
         connector = self.platform.registry.get(slug)
         cases = self._cases(slug, case_ids)
@@ -76,13 +81,15 @@ class EvaluationService:
                 _principal(slug, role) if role else "group:all-staff"
             )
             evidence = self.platform.retrieval.retrieve(
-                connector, spec, principal, role_rules=_rules_for_role(slug, role)
+                connector, spec, principal,
+                role_rules=_rules_for_role(slug, role),
+                glossary=_glossary_for(slug),
             )
 
             answer, outcome = "", None
             for chunk, result in _run_answer(
                 self.platform, case["question"], evidence.citations, (),
-                _instructions_for(slug),
+                _instructions_for(slug), evidence.trace.synonyms,
             ):
                 if result is not None:
                     outcome = result

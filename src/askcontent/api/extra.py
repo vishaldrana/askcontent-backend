@@ -986,10 +986,15 @@ def create_term(slug: str, body: TermCreate) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rid = session.execute(text(f"""
-            INSERT INTO {S}.glossary_term (org_id, connector_id, term, definition, aliases, source)
-            VALUES (:o, :c, :t, :d, :a, 'human')
+            INSERT INTO {S}.glossary_term
+                (org_id, connector_id, term, definition, aliases, source, status)
+            -- Typed by a person, so already reviewed. Leaving it 'proposed'
+            -- would mean a curated glossary does nothing until somebody also
+            -- approves their own entry.
+            VALUES (:o, :c, :t, :d, :a, 'human', 'confirmed')
             ON CONFLICT (connector_id, term) DO UPDATE
-              SET definition = EXCLUDED.definition, aliases = EXCLUDED.aliases
+              SET definition = EXCLUDED.definition, aliases = EXCLUDED.aliases,
+                  status = 'confirmed' 
             RETURNING id
         """), {"o": _org(session), "c": cid, "t": body.term,
                "d": body.definition, "a": body.aliases}).scalar_one()
@@ -1399,7 +1404,7 @@ def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
     return [f"This answer cites '{oldest.title}', which has no recorded date."]
 
 
-def _run_answer(platform, question, citations, history, instructions=""):
+def _run_answer(platform, question, citations, history, instructions="", synonyms=None):
     """Drive the async answerer from this synchronous stream.
 
     The endpoint is a sync generator because the retrieval pipeline is
@@ -1419,7 +1424,7 @@ def _run_answer(platform, question, citations, history, instructions=""):
     async def pump():
         try:
             async for item in platform.answering.stream(
-                question, citations, history, instructions
+                question, citations, history, instructions, synonyms
             ):
                 outbox.put(item)
         except Exception as exc:  # noqa: BLE001
@@ -1496,6 +1501,36 @@ def _principal_for_role(slug: str, role: str | None) -> str:
     return row or f"role:{role}"
 
 
+def _glossary_for(slug: str) -> tuple:
+    """The connector's approved terms, as the expander wants them.
+
+    Confirmed ones, and ones a person typed.
+
+    A *discovered* term is a proposal: the pass guesses from frequency and
+    phrasing, and is wrong often enough that expanding on its guesses would put
+    words into questions nobody agreed to. Review is what makes the glossary
+    safe to use here, and it is why the review queue exists.
+
+    A term somebody typed by hand needs no separate approval — typing it was
+    the approval. Treating it as a proposal means the glossary somebody
+    deliberately curated does nothing until they also click a button they have
+    no reason to expect.
+    """
+    from ..domain.expansion import Term
+
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        rows = session.execute(text(f"""
+            SELECT term, aliases FROM {S}.glossary_term
+            WHERE connector_id = :c
+              AND (status = 'confirmed' OR source = 'human')
+            ORDER BY length(term) DESC
+        """), {"c": cid}).mappings().all()
+    return tuple(
+        Term(term=r["term"], aliases=tuple(r["aliases"] or ())) for r in rows
+    )
+
+
 def _rules_for_role(slug: str, role: str | None) -> tuple:
     """The narrowing a role carries, as the retrieval gate wants it.
 
@@ -1568,9 +1603,9 @@ def chat_stream(body: AskStream):
                 yield _sse({"type": "tool_start", "name": name, "label": label})
 
             evidence = platform.retrieval.retrieve(
-                connector, spec, principal, role_rules=_rules_for_role(
-                    body.connector_id, body.role
-                ),
+                connector, spec, principal,
+                role_rules=_rules_for_role(body.connector_id, body.role),
+                glossary=_glossary_for(body.connector_id),
             )
             trace = evidence.trace
 
@@ -1608,6 +1643,7 @@ def chat_stream(body: AskStream):
             for text, result in _run_answer(
                 platform, body.question, evidence.citations, history,
                 _instructions_for(body.connector_id),
+                evidence.trace.synonyms,
             ):
                 if result is not None:
                     outcome = result

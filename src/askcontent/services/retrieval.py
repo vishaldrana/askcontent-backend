@@ -30,6 +30,7 @@ from ..domain.documents import (
 )
 from ..domain.ids import plan_hash
 from ..domain.retrieval_spec import Channel, RetrievalSpec
+from ..domain.expansion import expand as expand_query
 from ..domain.role_rules import decide as role_decide
 from ..domain.scope import ExclusionRule, KnowledgeScope, evaluate
 from ..ports.content_index import IndexFilters, IndexUnavailable
@@ -85,6 +86,14 @@ class RetrievalTrace(BaseModel):
     stale_index_count: int = 0
     forbidden_count: int = 0
     cache_hit_rate: float = 0.0
+    #: The question as sent to the index, when the glossary changed it. Kept
+    #: because a retrieval that silently searched for something other than what
+    #: was typed is one nobody can debug.
+    expanded_query: str = ""
+    expansions: tuple[str, ...] = ()
+    #: question word -> the corpus's words for it. Carried so the relevance
+    #: gate can accept a question phrased in the reader's vocabulary.
+    synonyms: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     #: Who ordered the evidence — the index's own cross-encoder, or ours.
     #: Worth recording: the two produce different orders from the same corpus,
     #: and an eval run that does not say which one ran cannot be compared with
@@ -194,7 +203,7 @@ class RetrievalService:
 
     def retrieve(
         self, connector: Connector, spec: RetrievalSpec, principal: str,
-        role_rules: tuple = (),
+        role_rules: tuple = (), glossary: tuple = (),
     ) -> Evidence:
         started = time.perf_counter()
         config = connector.retrieval
@@ -215,6 +224,26 @@ class RetrievalService:
             return Evidence(citations=(), trace=trace, refused=True, refusal_reason=trace.refusal)
 
         mark = _Stopwatch(trace)
+
+        # ② query expansion -------------------------------------------------
+        # The corpus's own words, added to the reader's. Retrieval only —
+        # never the answerer's, which must see the question as it was asked so
+        # that an answer to a rewritten question cannot be presented as an
+        # answer to the original.
+        if glossary and connector.retrieval.expand_with_glossary:
+            expanded = expand_query(spec.question, list(glossary))
+            if expanded.changed:
+                trace.expanded_query = expanded.question
+                trace.expansions = tuple(
+                    f"{hit} → {form}" for hit, form in expanded.matched
+                )
+                # The same mapping the gate needs, so search and gate agree
+                # about what the question was asking.
+                synonyms: dict[str, list[str]] = {}
+                for hit, form in expanded.matched:
+                    synonyms.setdefault(hit.lower(), []).append(form)
+                trace.synonyms = {k: tuple(v) for k, v in synonyms.items()}
+                spec = spec.model_copy(update={"question": expanded.question})
 
         # ③ candidate generation ------------------------------------------
         channel_results, channel_traces, degraded, ranked_by = self._generate_candidates(

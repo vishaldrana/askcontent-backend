@@ -69,11 +69,15 @@ class AnsweringService:
         citations,
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
+        synonyms: dict[str, tuple[str, ...]] | None = None,
     ) -> AsyncIterator[tuple[str, AnswerOutcome | None]]:
         """Yield `(text, None)` while writing, then one final `("", outcome)`."""
         passages = to_passages(citations)
 
-        verdict = assess(question, [p.text for p in passages], floor=self._floor)
+        verdict = assess(
+            question, [p.text for p in passages],
+            floor=self._floor, synonyms=synonyms,
+        )
         if not verdict.covered:
             # Refused before the answerer is even called. Calling it and hoping
             # it declines would be paying for a judgement already made, and

@@ -62,3 +62,34 @@ def test_a_question_with_no_subject_is_not_blocked_here():
 def test_the_floor_is_the_only_knob(floor, expected):
     verdict = assess("hyperlink parental leave policy", SURVEY_CORPUS, floor=floor)
     assert verdict.covered is expected
+
+
+def test_the_glossary_stops_the_gate_refusing_on_vocabulary():
+    """A reader asking how to "cancel a respondent", against documentation that
+    only says "terminate", is asking something the corpus covers. Without the
+    glossary the gate refuses it for using the wrong word — the exact failure
+    the glossary exists to prevent.
+
+    The question deliberately shares no other content word with the passage.
+    An earlier version of this test used "cancel a survey", which passed
+    without any glossary at all because "survey" alone cleared the floor — a
+    test that would have gone on passing if the feature were deleted."""
+    passages = [
+        "Terminate is applied to respondents who do not meet your targeting "
+        "criteria."
+    ]
+    question = "How do I cancel someone?"
+
+    assert not assess(question, passages).covered
+    assert assess(
+        question, passages, synonyms={"cancel": ("terminate", "disqualify")}
+    ).covered
+
+
+def test_a_multi_word_synonym_counts_when_all_its_words_appear():
+    """"end a survey" is two content words; matching only whole phrases would
+    miss it."""
+    passages = ["This will end a survey early for that respondent."]
+    assert assess(
+        "How do I cancel it?", passages, synonyms={"cancel": ("end a survey",)}
+    ).covered

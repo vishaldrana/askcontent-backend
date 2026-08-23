@@ -146,6 +146,7 @@ async def widget_ask(
     origin: str | None = Header(default=None),
 ):
     from .extra import (
+        _glossary_for,
         _instructions_for,
         _principal_for_role,
         _run_answer,
@@ -201,11 +202,14 @@ async def widget_ask(
                 channels=connector.retrieval.channels,
                 k_per_channel=connector.retrieval.k_per_channel,
             )
-            evidence = platform.retrieval.retrieve(connector, spec, principal)
+            evidence = platform.retrieval.retrieve(
+                connector, spec, principal, glossary=_glossary_for(slug)
+            )
 
             outcome = None
             for chunk, result in _run_answer(
-                platform, question, evidence.citations, (), _instructions_for(slug)
+                platform, question, evidence.citations, (),
+                _instructions_for(slug), evidence.trace.synonyms,
             ):
                 if result is not None:
                     outcome = result

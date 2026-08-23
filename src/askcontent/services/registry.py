@@ -42,6 +42,10 @@ class RetrievalConfig(BaseModel):
     k_per_channel: int = 20
     rrf_constant: int = 60
     reranker_id: str = "lexical-deterministic"
+    #: Add the corpus's own vocabulary to a question before searching. The
+    #: fix for the commonest help-centre failure: the reader types the word
+    #: they use and the documentation uses a different one.
+    expand_with_glossary: bool = True
     #: Ask the index to rank its own fragments when it can. Preferred where
     #: available: a cross-encoder inside the search service scores the
     #: fragments it indexed, while ours scores passages recovered afterwards,

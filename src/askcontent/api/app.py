@@ -460,7 +460,7 @@ def diagnose(connector_id: str, body: dict) -> dict:
     # Diagnose runs as a *role*, so it must carry that role's narrowing too —
     # a dry run that skips a gate the real query applies is a dry run that
     # certifies the wrong thing.
-    from .extra import _principal_for_role, _rules_for_role
+    from .extra import _glossary_for, _principal_for_role, _rules_for_role
 
     role = body.get("role")
     principal = (
@@ -468,7 +468,9 @@ def diagnose(connector_id: str, body: dict) -> dict:
         else body.get("principal", "user:asha")
     )
     evidence = platform.retrieval.retrieve(
-        connector, spec, principal, role_rules=_rules_for_role(connector_id, role)
+        connector, spec, principal,
+        role_rules=_rules_for_role(connector_id, role),
+        glossary=_glossary_for(connector_id),
     )
 
     payload = evidence.model_dump(mode="json")
@@ -485,7 +487,7 @@ def diagnose(connector_id: str, body: dict) -> dict:
         text_out, outcome = "", None
         for chunk, result in _run_answer(
             platform, spec.question, evidence.citations, (),
-            _instructions_for(connector_id),
+            _instructions_for(connector_id), evidence.trace.synonyms,
         ):
             if result is not None:
                 outcome = result

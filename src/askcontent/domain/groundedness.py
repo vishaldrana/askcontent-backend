@@ -94,7 +94,13 @@ def content_terms(text: str) -> set[str]:
     return words - STOPWORDS - INTERROGATIVE
 
 
-def assess(question: str, passages: list[str], *, floor: float = 0.34) -> Groundedness:
+def assess(
+    question: str,
+    passages: list[str],
+    *,
+    floor: float = 0.34,
+    synonyms: dict[str, tuple[str, ...]] | None = None,
+) -> Groundedness:
     """Does the retrieved text cover what the question is about?
 
     `floor` is the share of the question's content words that must appear
@@ -106,6 +112,14 @@ def assess(question: str, passages: list[str], *, floor: float = 0.34) -> Ground
     Singular and plural forms are treated as the same word, because a corpus
     that says "surveys" plainly covers a question that says "survey", and
     failing on that would be a spelling test rather than a relevance test.
+
+    `synonyms` carries the glossary's answer to the same problem one step
+    further out. A reader asking how to "cancel" a survey, against
+    documentation that only ever says "terminate", is asking a question the
+    corpus covers — and without this the gate refuses it for using the wrong
+    word, which is exactly the failure the glossary exists to prevent. It is
+    the same mapping that expanded the query, so the gate and the search agree
+    about what the question was asking.
     """
     asked = content_terms(question)
     if not asked:
@@ -117,7 +131,19 @@ def assess(question: str, passages: list[str], *, floor: float = 0.34) -> Ground
     available = content_terms(" ".join(passages))
     stems = {_stem(w) for w in available}
 
-    matched = {w for w in asked if w in available or _stem(w) in stems}
+    def covered(word: str) -> bool:
+        if word in available or _stem(word) in stems:
+            return True
+        # A question word is covered if any of the corpus's own words for it
+        # appears. Every form counts, because "end a survey" is two words and
+        # matching only whole phrases would miss it.
+        for form in (synonyms or {}).get(word, ()):
+            terms = content_terms(form)
+            if terms and terms <= available:
+                return True
+        return False
+
+    matched = {w for w in asked if covered(w)}
     coverage = len(matched) / len(asked)
     return Groundedness(
         covered=coverage >= floor,
