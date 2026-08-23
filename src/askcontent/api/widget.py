@@ -146,6 +146,7 @@ async def widget_ask(
     origin: str | None = Header(default=None),
 ):
     from .extra import (
+        _answer_about_the_corpus,
         _glossary_for,
         _instructions_for,
         _principal_for_role,
@@ -195,6 +196,19 @@ async def widget_ask(
 
     def generate():
         try:
+            # Same routing as the console. "What can you help with" is the
+            # first thing a visitor types into a widget, and a refusal there
+            # is the whole product's first impression.
+            about = _answer_about_the_corpus(slug, question)
+            if about is not None:
+                yield _frame("token", about)
+                yield _frame("evidence", json.dumps({
+                    "citations": [], "conflicts": [], "notices": [],
+                    "refused": False, "refusal_reason": None,
+                }))
+                _record_use(embed["id"])
+                return
+
             spec = RetrievalSpec(
                 intent=Intent.LOOKUP,
                 scope_ref=f"scope:{connector.connector_id}:v{connector.version}",

@@ -971,10 +971,14 @@ def review_term(slug: str, term_id: str, body: TermDecision) -> dict:
         _connector_id(session, slug)
         session.execute(text(f"""
             UPDATE {S}.glossary_term
-            SET status = :s, reviewed_by = :who, reviewed_at = now(),
+            -- `:s` is read as a value and as a comparand, and Postgres
+            -- cannot infer one type from that. Cast it once, explicitly.
+            SET status = CAST(:s AS varchar), reviewed_by = :who,
+                reviewed_at = now(),
                 definition = coalesce(:definition, definition),
-                source = CASE WHEN :s = 'confirmed' THEN 'human' ELSE source END
-            WHERE id = :t
+                source = CASE WHEN CAST(:s AS varchar) = 'confirmed'
+                              THEN 'human' ELSE source END
+            WHERE id = CAST(:t AS uuid)
         """), {"s": body.status, "who": body.actor, "t": term_id,
                "definition": body.definition})
         session.commit()
@@ -1501,6 +1505,52 @@ def _principal_for_role(slug: str, role: str | None) -> str:
     return row or f"role:{role}"
 
 
+def _answer_about_the_corpus(slug: str, question: str) -> str | None:
+    """The answer to "what can you tell me", if that is what was asked.
+
+    Returned before retrieval runs, because there is nothing to retrieve: the
+    answer is the shape of the collection, not a passage in it. Running it
+    through retrieval produces a refusal on a question the system can answer
+    perfectly well — and it is the first thing many people type.
+    """
+    from ..domain.overview import describe
+    from ..domain.question_kind import QuestionKind, classify
+
+    kind = classify(question)
+    if kind is QuestionKind.CONTENT:
+        return None
+
+    platform = _platform()
+    connector = platform.registry.get(slug)
+
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        row = session.execute(text(f"""
+            SELECT name, description FROM {S}.connector WHERE id = :c
+        """), {"c": cid}).mappings().one()
+        terms = session.execute(text(f"""
+            SELECT term FROM {S}.glossary_term
+            WHERE connector_id = :c AND (status = 'confirmed' OR source = 'human')
+            ORDER BY coalesce(documents, 0) DESC LIMIT 6
+        """), {"c": cid}).scalars().all()
+
+    from ..services.retrieval import scope_population
+
+    overview = describe(
+        row["name"], row["description"] or "",
+        list(scope_population(platform.index, connector)),
+        terms=list(terms),
+    )
+
+    if kind is QuestionKind.SOCIAL:
+        # A greeting answered with a wall of statistics is its own kind of
+        # rude. One sentence of orientation, then get out of the way.
+        first = overview.text.split(". ")[0]
+        return f"Hello. {first}. What would you like to know?"
+
+    return overview.text
+
+
 def _glossary_for(slug: str) -> tuple:
     """The connector's approved terms, as the expander wants them.
 
@@ -1584,6 +1634,28 @@ def chat_stream(body: AskStream):
     def generate():
         started = dt.datetime.now()
         try:
+            # Questions about the corpus are answered from the corpus's shape,
+            # not from a passage in it. Checked first because there is nothing
+            # for retrieval to do.
+            about = _answer_about_the_corpus(body.connector_id, body.question)
+            if about is not None:
+                for word in about.split(" "):
+                    yield _sse({"type": "token", "text": word + " "})
+                yield _sse({
+                    "type": "complete", "citations": [], "conflicts": [],
+                    "notices": [], "refused": False, "refusal_reason": None,
+                    "followups": [],
+                    "answered_by": {
+                        "provider": "corpus-overview", "model": "constructed",
+                        "grounded": True, "cited": [],
+                    },
+                    "trace": {"kind": "scope"},
+                })
+                elapsed = (dt.datetime.now() - started).total_seconds() * 1000
+                yield _sse({"type": "timing", "elapsed_ms": round(elapsed)})
+                yield _sse({"type": "done"})
+                return
+
             spec = RetrievalSpec(
                 intent=Intent.LOOKUP,
                 scope_ref=f"scope:{connector.connector_id}:v{connector.version}",
@@ -2162,26 +2234,31 @@ def append_turn(thread_id: str, body: TurnCreate) -> dict:
         thread = _thread_row(session, thread_id)
         org = _org(session)
 
-        ordinal = session.execute(text(f"""
-            SELECT coalesce(max(ordinal), 0) + 1 FROM {S}.chat_turn
-            WHERE thread_id = CAST(:id AS uuid)
-        """), {"id": thread_id}).scalar_one()
-
+        # The ordinal is chosen inside the INSERT rather than read first.
+        #
+        # Two appends racing — a retry, a double-submit, React running an
+        # effect twice — both read the same maximum and both write it, and one
+        # loses on the unique constraint. The turn is then simply gone, which
+        # is worse than a slow write: the answer was given and the transcript
+        # does not have it.
         turn_id = session.execute(text(f"""
             INSERT INTO {S}.chat_turn
                 (org_id, thread_id, ordinal, question, answer, evidence, steps,
                  grounded, unsupported_reason, answered_by, elapsed_ms, error)
-            VALUES (:o, CAST(:t AS uuid), :n, :q, :a, CAST(:ev AS jsonb),
-                    CAST(:st AS jsonb), :g, :ur, CAST(:ab AS jsonb), :ms, :err)
-            RETURNING CAST(id AS text)
+            SELECT :o, CAST(:t AS uuid),
+                   coalesce(max(ordinal), 0) + 1,
+                   :q, :a, CAST(:ev AS jsonb), CAST(:st AS jsonb), :g, :ur,
+                   CAST(:ab AS jsonb), :ms, :err
+            FROM {S}.chat_turn WHERE thread_id = CAST(:t AS uuid)
+            RETURNING CAST(id AS text), ordinal
         """), {
-            "o": org, "t": thread_id, "n": ordinal, "q": body.question,
+            "o": org, "t": thread_id, "q": body.question,
             "a": body.answer, "ev": json.dumps(body.evidence, default=str),
             "st": json.dumps(body.steps, default=str), "g": body.grounded,
             "ur": body.unsupported_reason,
             "ab": json.dumps(body.answered_by, default=str),
             "ms": body.elapsed_ms, "err": body.error,
-        }).scalar_one()
+        }).one()
 
         # The first question becomes the thread's name. People recognise a
         # conversation by what they asked, not by a date or an id.
@@ -2193,7 +2270,7 @@ def append_turn(thread_id: str, body: TurnCreate) -> dict:
              WHERE id = CAST(:t AS uuid) AND org_id = :o
         """), {"t": thread_id, "o": org, "q": body.question})
         session.commit()
-        return {"id": turn_id, "ordinal": ordinal, "thread_id": thread["id"]}
+        return {"id": turn_id[0], "ordinal": turn_id[1], "thread_id": thread["id"]}
 
 
 # ------------------------------------------------------- feedback and evals

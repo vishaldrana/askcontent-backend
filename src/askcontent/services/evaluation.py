@@ -50,6 +50,7 @@ class EvaluationService:
 
     def run(self, slug: str, *, case_ids: list[str] | None = None) -> dict:
         from ..api.extra import (
+            _answer_about_the_corpus,
             _glossary_for,
             _instructions_for,
             _rules_for_role,
@@ -64,6 +65,30 @@ class EvaluationService:
 
         for case in cases:
             started = time.perf_counter()
+
+            # The same routing the chat path uses. An eval that answered a
+            # scope question differently from the product would be testing
+            # something nobody experiences.
+            about = _answer_about_the_corpus(slug, case["question"])
+            if about is not None:
+                expectations = [
+                    Expectation(kind=e.get("kind", ""), value=e.get("value", ""))
+                    for e in (case["expectations"] or [])
+                ]
+                failures = check(
+                    expectations,
+                    Outcome(answer=about, grounded=True, cited=()),
+                )
+                results.append(
+                    CaseResult(
+                        case_id=case["id"], question=case["question"],
+                        passed=not failures, failures=failures, answer=about,
+                        cited=[], grounded=True,
+                        elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                )
+                continue
+
             expectations = [
                 Expectation(kind=e.get("kind", ""), value=e.get("value", ""))
                 for e in (case["expectations"] or [])
