@@ -616,6 +616,17 @@ _CLAIM_STOP = frozenset(
     "and following within least most more than about over under".split()
 )
 
+#: Relative ages printed as page furniture — "Last updated 3 years ago" — are
+#: not claims about anything. Two help pages footered "2 years ago" and "3
+#: years ago" were being reported as sources disagreeing about a quantity,
+#: which is worse than useless: a conflict panel that cries wolf is one nobody
+#: reads on the day two documents really do disagree.
+_RELATIVE_AGE = __import__("re").compile(
+    r"\b(?:last\s+(?:updated|modified|edited|reviewed)|updated|posted|published)\b"
+    r"[^.\n]{0,40}?\b\d+\s+(?:second|minute|hour|day|week|month|year)s?\s+ago",
+    __import__("re").I,
+)
+
 #: Units that are dates rather than measures. "15 April" and "1 March" are not
 #: competing claims about the same quantity, they are two effective dates.
 _DATE_UNITS = frozenset(
@@ -674,6 +685,10 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
     for citation in citations:
         text = citation.span
         tokens = _significant(text)
+        # Strip the furniture before looking for claims, rather than after:
+        # the surrounding-terms window would otherwise still be polluted by it.
+        text = _RELATIVE_AGE.sub(" ", text)
+
         for match in _MONEY.finditer(text):
             value = match.group(1).replace(",", "")
             window = _significant(

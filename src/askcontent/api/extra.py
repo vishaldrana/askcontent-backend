@@ -1534,3 +1534,199 @@ def delete_upload(slug: str, upload_id: str) -> dict:
         ), {"c": collection["id"], "d": f"upload:{upload_id}"})
         session.commit()
     return {"deleted": upload_id}
+
+
+# ------------------------------------------------------------------- threads
+#
+# A chat that forgets is a search box with a slower interface. The value of a
+# conversation is the second question, and that only works if the first one is
+# still there. Same endpoint shape as askdb, so the two products are one thing
+# to learn.
+
+
+class ThreadCreate(BaseModel):
+    connector_id: str | None = None
+    role: str | None = None
+    title: str | None = None
+
+
+class ThreadPatch(BaseModel):
+    title: str | None = None
+    role: str | None = None
+    archived: bool | None = None
+
+
+class TurnCreate(BaseModel):
+    question: str
+    answer: str = ""
+    evidence: dict = {}
+    steps: list = []
+    grounded: bool = False
+    unsupported_reason: str | None = None
+    answered_by: dict = {}
+    elapsed_ms: int | None = None
+    error: str | None = None
+
+
+def _thread_row(session, thread_id: str):
+    row = session.execute(text(f"""
+        SELECT CAST(t.id AS text) AS id, t.title, t.role, t.archived_at,
+               t.created_at, t.updated_at,
+               c.slug AS connector_id,
+               (SELECT count(*) FROM {S}.chat_turn x WHERE x.thread_id = t.id) AS turns
+        FROM {S}.chat_thread t
+        LEFT JOIN {S}.connector c ON c.id = t.connector_id
+        WHERE t.id = CAST(:id AS uuid) AND t.org_id = :o
+    """), {"id": thread_id, "o": _org(session)}).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(404, "no such thread")
+    return dict(row)
+
+
+@router.post("/api/threads", status_code=201)
+def create_thread(body: ThreadCreate) -> dict:
+    with _sessions()() as session:
+        connector_id = None
+        if body.connector_id:
+            connector_id = session.execute(text(
+                f"SELECT id FROM {S}.connector WHERE org_id = :o AND slug = :s"
+            ), {"o": _org(session), "s": body.connector_id}).scalar_one_or_none()
+
+        thread_id = session.execute(text(f"""
+            INSERT INTO {S}.chat_thread (org_id, connector_id, title, role)
+            VALUES (:o, :c, :t, :r) RETURNING CAST(id AS text)
+        """), {
+            "o": _org(session), "c": connector_id,
+            "t": body.title, "r": body.role,
+        }).scalar_one()
+        session.commit()
+        return _thread_row(session, thread_id)
+
+
+@router.get("/api/threads")
+def list_threads(connector_id: str | None = None, limit: int = 100) -> list[dict]:
+    """Most recently used first — the order people actually look for a
+    conversation in. Archived threads are excluded rather than dimmed: a list
+    that shows everything forever stops being a list."""
+    with _sessions()() as session:
+        rows = session.execute(text(f"""
+            SELECT CAST(t.id AS text) AS id, t.title, t.role,
+                   t.created_at, t.updated_at,
+                   c.slug AS connector_id,
+                   (SELECT count(*) FROM {S}.chat_turn x WHERE x.thread_id = t.id) AS turns
+            FROM {S}.chat_thread t
+            LEFT JOIN {S}.connector c ON c.id = t.connector_id
+            WHERE t.org_id = :o AND t.archived_at IS NULL
+              AND (CAST(:conn AS text) IS NULL OR c.slug = CAST(:conn AS text))
+            ORDER BY t.updated_at DESC
+            LIMIT :n
+        """), {"o": _org(session), "conn": connector_id, "n": limit}).mappings().all()
+        return [dict(r) for r in rows]
+
+
+@router.get("/api/threads/{thread_id}")
+def get_thread(thread_id: str) -> dict:
+    with _sessions()() as session:
+        thread = _thread_row(session, thread_id)
+        turns = session.execute(text(f"""
+            SELECT CAST(id AS text) AS id, ordinal, question, answer, evidence,
+                   steps, grounded, unsupported_reason, answered_by,
+                   elapsed_ms, error, created_at
+            FROM {S}.chat_turn
+            WHERE thread_id = CAST(:id AS uuid) AND org_id = :o
+            ORDER BY ordinal
+        """), {"id": thread_id, "o": _org(session)}).mappings().all()
+        return thread | {"turns": [dict(t) for t in turns]}
+
+
+@router.patch("/api/threads/{thread_id}")
+def update_thread(thread_id: str, body: ThreadPatch) -> dict:
+    with _sessions()() as session:
+        _thread_row(session, thread_id)
+        session.execute(text(f"""
+            UPDATE {S}.chat_thread SET
+                title = coalesce(:t, title),
+                role = coalesce(:r, role),
+                archived_at = CASE WHEN :arch IS NULL THEN archived_at
+                                   WHEN :arch THEN now() ELSE NULL END,
+                updated_at = now()
+            WHERE id = CAST(:id AS uuid) AND org_id = :o
+        """), {
+            "id": thread_id, "o": _org(session), "t": body.title,
+            "r": body.role, "arch": body.archived,
+        })
+        session.commit()
+        return _thread_row(session, thread_id)
+
+
+@router.delete("/api/threads/{thread_id}", status_code=204)
+def delete_thread(thread_id: str) -> None:
+    with _sessions()() as session:
+        _thread_row(session, thread_id)
+        session.execute(text(
+            f"DELETE FROM {S}.chat_thread WHERE id = CAST(:id AS uuid) AND org_id = :o"
+        ), {"id": thread_id, "o": _org(session)})
+        session.commit()
+
+
+@router.delete("/api/threads")
+def delete_threads(connector_id: str | None = None) -> dict:
+    """Clear the list. Scoped to one connector when given, because "delete all"
+    on a screen showing one knowledgebase must not take the others with it."""
+    with _sessions()() as session:
+        deleted = session.execute(text(f"""
+            DELETE FROM {S}.chat_thread t
+            USING {S}.connector c
+            WHERE t.org_id = :o
+              AND (CAST(:conn AS text) IS NULL
+                   OR (c.id = t.connector_id AND c.slug = CAST(:conn AS text)))
+              AND (CAST(:conn AS text) IS NULL OR t.connector_id IS NOT NULL)
+        """), {"o": _org(session), "conn": connector_id}).rowcount
+        session.commit()
+        return {"deleted": deleted}
+
+
+@router.post("/api/threads/{thread_id}/turns", status_code=201)
+def append_turn(thread_id: str, body: TurnCreate) -> dict:
+    """Record one exchange.
+
+    Written by the console after the stream finishes rather than by the stream
+    itself: a turn is only worth keeping once it is complete, and a half-written
+    answer in a transcript is worse than a missing one.
+    """
+    with _sessions()() as session:
+        thread = _thread_row(session, thread_id)
+        org = _org(session)
+
+        ordinal = session.execute(text(f"""
+            SELECT coalesce(max(ordinal), 0) + 1 FROM {S}.chat_turn
+            WHERE thread_id = CAST(:id AS uuid)
+        """), {"id": thread_id}).scalar_one()
+
+        turn_id = session.execute(text(f"""
+            INSERT INTO {S}.chat_turn
+                (org_id, thread_id, ordinal, question, answer, evidence, steps,
+                 grounded, unsupported_reason, answered_by, elapsed_ms, error)
+            VALUES (:o, CAST(:t AS uuid), :n, :q, :a, CAST(:ev AS jsonb),
+                    CAST(:st AS jsonb), :g, :ur, CAST(:ab AS jsonb), :ms, :err)
+            RETURNING CAST(id AS text)
+        """), {
+            "o": org, "t": thread_id, "n": ordinal, "q": body.question,
+            "a": body.answer, "ev": json.dumps(body.evidence, default=str),
+            "st": json.dumps(body.steps, default=str), "g": body.grounded,
+            "ur": body.unsupported_reason,
+            "ab": json.dumps(body.answered_by, default=str),
+            "ms": body.elapsed_ms, "err": body.error,
+        }).scalar_one()
+
+        # The first question becomes the thread's name. People recognise a
+        # conversation by what they asked, not by a date or an id.
+        session.execute(text(f"""
+            UPDATE {S}.chat_thread
+               SET updated_at = now(),
+                   title = CASE WHEN title IS NULL OR title = ''
+                                THEN left(:q, 300) ELSE title END
+             WHERE id = CAST(:t AS uuid) AND org_id = :o
+        """), {"t": thread_id, "o": org, "q": body.question})
+        session.commit()
+        return {"id": turn_id, "ordinal": ordinal, "thread_id": thread["id"]}
