@@ -100,6 +100,7 @@ def run(
     cfg = resolve_config(config)
     started = time.monotonic()
     limits: list[Limit] = []
+    traces: list[Any] = []
     passages_read = 0
 
     model = _chat(platform, cfg.get("model"))
@@ -145,6 +146,7 @@ def run(
             connector, spec, principal, role_rules=role_rules, glossary=glossary
         )
         passages_read += len(evidence.citations)
+        traces.append(evidence.trace)
 
         # Numbered once, across the whole run. A report that renumbered per
         # sub-question would carry four different [1]s, and the reader would
@@ -190,7 +192,7 @@ def run(
         report = Report(
             question=question, depth=cfg["depth"], plan=tuple(plan),
             findings=tuple(findings), limits=tuple(limits),
-            citations=tuple(citations),
+            citations=tuple(citations), traces=tuple(traces),
             text="I could not find enough in this knowledgebase to research that.",
             elapsed_s=time.monotonic() - started, passages_read=passages_read,
         )
@@ -217,6 +219,7 @@ def run(
             c for i, c in enumerate(citations, start=1)
             if str(i) in {n for f in findings if f.usable for n in f.citations}
         ),
+        traces=tuple(traces),
         text=text,
         elapsed_s=time.monotonic() - started, passages_read=passages_read,
     )

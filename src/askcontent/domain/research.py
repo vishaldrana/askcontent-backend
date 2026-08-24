@@ -127,6 +127,12 @@ class Report(BaseModel):
     #: report whose numbers point nowhere is the exact failure a report is
     #: best at hiding — there is more of it to believe.
     citations: tuple[Any, ...] = ()
+    #: One retrieval trace per sub-question actually asked. Carried because a
+    #: research turn goes out over the same channel as an ordinary answer and
+    #: has to arrive in the same shape: a payload missing a field the reader's
+    #: screen reads is a blank screen, and the difference between the two
+    #: turns is how much work went in, never what comes back.
+    traces: tuple[Any, ...] = ()
     limits: tuple[Limit, ...] = Field(default_factory=tuple)
     text: str = ""
     elapsed_s: float = 0.0

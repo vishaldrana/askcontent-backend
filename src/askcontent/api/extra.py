@@ -2266,6 +2266,54 @@ def _rules_for_role(slug: str, role: str | None) -> tuple:
     )
 
 
+def _merge_traces(traces) -> "RetrievalTrace":
+    """The several retrievals of a research run, as one trace.
+
+    A run asks the corpus once per sub-question, so there is no single trace
+    to send. The counts add up, the degradations are unioned because the same
+    channel failing three times is one thing wrong, and the candidates are
+    kept end to end — "the right document was retrieved and the reranker
+    buried it" is still a different bug from "it was never retrieved", and a
+    research run is exactly where that is hardest to see by eye.
+    """
+    from ..services.retrieval import RetrievalTrace
+
+    traces = [t for t in traces if t is not None]
+    if not traces:
+        return RetrievalTrace(spec_json="", plan_hash="", filters={})
+
+    first = traces[0]
+    degraded: list[str] = []
+    for trace in traces:
+        for line in trace.degraded:
+            if line not in degraded:
+                degraded.append(line)
+
+    phase_ms: dict[str, float] = {}
+    for trace in traces:
+        for phase, ms in trace.phase_ms.items():
+            phase_ms[phase] = round(phase_ms.get(phase, 0.0) + ms, 1)
+
+    return RetrievalTrace(
+        spec_json=first.spec_json,
+        plan_hash=first.plan_hash,
+        filters=first.filters,
+        channels=tuple(c for t in traces for c in t.channels),
+        candidates=tuple(c for t in traces for c in t.candidates),
+        degraded=tuple(degraded),
+        stale_index_count=sum(t.stale_index_count for t in traces),
+        forbidden_count=sum(t.forbidden_count for t in traces),
+        cache_hit_rate=round(
+            sum(t.cache_hit_rate for t in traces) / len(traces), 3
+        ),
+        expanded_query=first.expanded_query,
+        expansions=tuple(dict.fromkeys(e for t in traces for e in t.expansions)),
+        reranked_by=", ".join(dict.fromkeys(t.reranked_by for t in traces if t.reranked_by)),
+        phase_ms=phase_ms,
+        total_ms=round(sum(t.total_ms for t in traces), 1),
+    )
+
+
 def _research_turn(platform, connector, body, principal, started):
     """One research run, as chat events.
 
@@ -2277,6 +2325,7 @@ def _research_turn(platform, connector, body, principal, started):
     """
     from ..domain.research import resolve_config
     from ..services.research import run as run_research
+    from ..services.retrieval import Evidence
 
     config = resolve_config(_research_config_for(body.connector_id))
     if not config.get("enabled"):
@@ -2332,22 +2381,39 @@ def _research_turn(platform, connector, body, principal, started):
     yield _sse({"type": "tool_end", "name": "investigate", "label": phases[1][1],
                 "status": "ok", "detail": f"{findings} sub-questions"})
 
+    # Built as an Evidence, not as a dict that resembles one.
+    #
+    # The first version assembled the payload field by field and left out
+    # `trace`, because a research run has several traces and none of them is
+    # *the* one. The console reads `trace.degraded` on every completed turn,
+    # so the answer finished streaming and then the screen went white — a
+    # research turn is the same shape of turn, and the type that says so is
+    # the only thing that keeps it that way.
+    grounded = bool(report and report.grounded)
+    evidence = Evidence(
+        citations=tuple(report.citations) if report else (),
+        conflicts=(),
+        notices=tuple(limit.detail for limit in (report.limits if report else ())),
+        trace=_merge_traces(report.traces if report else ()),
+        refused=not grounded,
+        refusal_reason=None if grounded
+        else "nothing in this knowledgebase supported a report on that",
+    )
     yield _sse({
         "type": "complete",
-        "citations": [
-            c.model_dump(mode="json") for c in (report.citations if report else ())
-        ],
-        "conflicts": [], "notices": [
-            limit.detail for limit in (report.limits if report else ())
-        ],
-        "refused": not (report and report.grounded),
-        "refusal_reason": None if (report and report.grounded)
-        else "nothing in this knowledgebase supported a report on that",
+        **evidence.model_dump(mode="json"),
         "followups": [],
+        # Every passage that survives into `citations` is one the report
+        # cites -- the uncited ones were dropped on the way out. So the cited
+        # set is the whole list, renumbered to it. Sending an empty one made
+        # the screen read "answered from 0 of 7 sources" under a report whose
+        # every heading came from those seven.
         "answered_by": {"provider": "research", "model": config["depth"],
-                        "grounded": bool(report and report.grounded)},
+                        "grounded": grounded,
+                        "cited": list(range(1, len(evidence.citations) + 1))},
         "research": (
-            report.model_dump(mode="json", exclude={"citations"}) if report else None
+            report.model_dump(mode="json", exclude={"citations", "traces"})
+            if report else None
         ),
     })
     yield _sse({"type": "timing",

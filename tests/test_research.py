@@ -59,3 +59,38 @@ def test_a_question_that_needs_investigation_is_not():
 def test_a_research_marker_beats_the_length_test():
     # Short, but it is a comparison — one retrieval will not do it.
     assert not looks_single_shot("compare overdraft fees")
+
+
+def _trace(**kw):
+    from askcontent.services.retrieval import RetrievalTrace
+
+    return RetrievalTrace(spec_json="{}", plan_hash="h", filters={}, **kw)
+
+
+def test_a_research_turn_carries_every_field_an_ordinary_turn_does():
+    """The white-screen regression.
+
+    A research turn goes out over the same channel as an ordinary answer and
+    is read by the same screen, which reaches into `trace` on every completed
+    turn. A payload that leaves it out does not degrade — it unmounts.
+    """
+    from askcontent.api.extra import _merge_traces
+    from askcontent.services.retrieval import Evidence
+
+    evidence = Evidence(citations=(), trace=_merge_traces(()))
+    assert set(Evidence.model_fields) <= set(evidence.model_dump(mode="json"))
+    assert evidence.trace.degraded == ()
+
+
+def test_merging_adds_the_counts_and_unions_the_degradations():
+    from askcontent.api.extra import _merge_traces
+
+    merged = _merge_traces([
+        _trace(forbidden_count=2, degraded=("vector channel down",), total_ms=10.0),
+        _trace(forbidden_count=3, degraded=("vector channel down",), total_ms=5.0),
+    ])
+    assert merged.forbidden_count == 5
+    assert merged.total_ms == 15.0
+    # The same channel failing on every sub-question is one thing wrong, and
+    # saying it three times reads as three.
+    assert merged.degraded == ("vector channel down",)
