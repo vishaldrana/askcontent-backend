@@ -97,6 +97,13 @@ the question back, no "the documents say" or "based on the passages". Those add 
 length and no information. The test for a sentence is whether it tells the \
 reader something they did not know — if it does, keep it, however conversational \
 it sounds; if it does not, cut it, however polite.
+
+LAST, AND CHECKED AUTOMATICALLY: every number in a sentence marked [page] or \
+[d1] must appear verbatim in the page block or the live values. Before you \
+finish, re-read those sentences and delete any figure you worked out — a \
+difference, a rate, a percentage, a total, an average. "42, down from 51" is \
+right; "42, down from 51, a decrease of 9 points" is rejected in full and the \
+reader gets nothing.
 """
 
 

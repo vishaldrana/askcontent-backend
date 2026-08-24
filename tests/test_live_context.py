@@ -246,3 +246,25 @@ def test_the_refusal_names_every_place_it_looked():
     )
     assert not outcome.supported
     assert "live figures" in said
+
+
+def test_a_derived_figure_is_not_supported():
+    # The gate, through the service: the model wrote a figure that is on
+    # neither the readings nor the page, and credited it to them.
+    answerer = _Fake("Your NPS fell by 9 points [d1][d2].", used_data=(1, 2))
+    _, outcome = _answer(
+        answerer, "what is my NPS this quarter", [_Citation()], data=_set()
+    )
+    assert not outcome.supported
+    assert outcome.derived == ("9",)
+    assert "not on the page" in outcome.reason
+
+
+def test_a_quoted_figure_still_passes_the_gate():
+    # 42 and 1,284 are both in the readings; nothing here was worked out.
+    answerer = _Fake("Your NPS is 42, from 1,284 responses [d1][d2].", used_data=(1, 2))
+    _, outcome = _answer(
+        answerer, "what is my NPS this quarter", [_Citation()], data=_set()
+    )
+    assert outcome.supported
+    assert outcome.derived == ()

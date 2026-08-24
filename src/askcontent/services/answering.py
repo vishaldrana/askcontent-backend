@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 
+from ..domain.figures import unsupported_figures
 from ..domain.groundedness import assess
 from ..ports.answerer import AnswerChunk, Passage
 
@@ -32,6 +33,10 @@ class AnswerOutcome:
     used_page: bool = False
     #: Datapoint numbers the answer used.
     used_data: tuple[int, ...] = ()
+    #: Figures attributed to the page or a live reading that are in neither.
+    #: Always empty in practice; non-empty means the answer did arithmetic and
+    #: presented the result as something the reader could look up.
+    derived: tuple[str, ...] = ()
     #: Set when the answerer itself failed — a timeout, a rate limit, an
     #: outage.
     #:
@@ -153,6 +158,18 @@ class AnsweringService:
                 # returned five yesterday is normal.
                 fabricated_data = tuple(sorted(set(chunk.used_data) - offered_data))
                 data_claimed = bool(set(chunk.used_data) & offered_data)
+                # A figure marked [page] or [d1] has to be *in* the page or the
+                # reading. A derived one is a guess at a definition presented
+                # as a reading — the reader looks at the screen it names and
+                # cannot find it.
+                derived = unsupported_figures(
+                    said,
+                    sources="\n".join(
+                        ([page.render()] if has_page else [])
+                        + ([data.render()] if has_data else [])
+                    ),
+                    question=question,
+                )
                 uncited = (
                     bool(said.strip())
                     and not chunk.cited
@@ -163,11 +180,13 @@ class AnsweringService:
                     supported=(
                         chunk.supported and not invented and not uncited
                         and not fabricated_page and not fabricated_data
+                        and not derived
                     ),
                     cited=chunk.cited,
                     invented=invented,
                     used_page=page_claimed,
                     used_data=tuple(sorted(set(chunk.used_data) & offered_data)),
+                    derived=derived,
                     reason=(
                         "the answer attributed something to a page that was "
                         "never supplied"
@@ -175,6 +194,9 @@ class AnsweringService:
                         f"the answer cited live values that were never supplied: "
                         f"{', '.join(f'd{n}' for n in fabricated_data)}"
                         if fabricated_data else
+                        f"the answer worked out figures that are not on the page "
+                        f"or in the readings it credited: {', '.join(derived)}"
+                        if derived else
                         "the answer cited nothing, so none of it can be checked"
                         if uncited else None
                     ),

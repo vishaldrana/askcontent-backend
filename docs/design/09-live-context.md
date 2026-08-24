@@ -95,6 +95,12 @@ The rules that follow from the type:
 - **A datapoint is cited by time, not by link.** The widget renders
   *"Survey analytics · fetched 14:32"*, not a hyperlink. A reader cannot open
   it; pretending they can is worse than saying so.
+- **Neither a datapoint nor the page may be computed from.** Every number in a
+  sentence marked `[page]` or `[d1]` has to appear verbatim in what was
+  supplied. Checked, not merely instructed, by `domain/figures.py` — the
+  arithmetic is not the problem, the definition is: nothing tells the model
+  whether "invited" is the denominator this product means by a response rate,
+  so a derived figure is a guess at a definition presented as a reading.
 - **Passages outrank datapoints for anything the corpus covers.** If the help
   centre documents how NPS is calculated, that explanation comes from the
   document. The datapoint supplies *this survey's number*, never the

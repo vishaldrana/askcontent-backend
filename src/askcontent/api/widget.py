@@ -127,6 +127,31 @@ def _embed_for(key: str) -> dict:
     return dict(row)
 
 
+#: Internal reasons, as a visitor should hear them. Matched on a fragment
+#: rather than exhaustively, because a reason nobody has translated yet should
+#: still come out as a sentence rather than as a stack of jargon.
+_VISITOR_REASONS = (
+    ("cited nothing", "I could not support that from anything I can show you, so I "
+                      "have not answered it."),
+    ("never supplied", "Something went wrong assembling that answer, so I have not "
+                       "given it."),
+    ("live values that were never supplied", "Something went wrong assembling that "
+                                             "answer, so I have not given it."),
+    ("not on the page", "I would have had to work that figure out rather than read "
+                        "it, and a number I calculated is not one you can check."),
+)
+
+
+def _for_a_visitor(reason: str | None) -> str:
+    if not reason:
+        return "This is not covered by the documents I can see."
+    lowered = reason.lower()
+    for fragment, sentence in _VISITOR_REASONS:
+        if fragment in lowered:
+            return sentence
+    return reason
+
+
 def _context_source_for(slug: str) -> object:
     from .extra import _sessions
 
@@ -395,9 +420,26 @@ async def widget_ask(
                 # no evidence, which is the behaviour we want.
                 payload["citations"] = []
                 payload["refused"] = True
-                payload["refusal_reason"] = outcome.reason or (
-                    "This is not covered by the documents I can see."
-                )
+                # Withheld when *we* rejected it, not when the model declined.
+                #
+                # The distinction decides whether the prose is worth keeping.
+                # A model that declines writes the explanation — "the passages
+                # do not say which screen" — and that sentence is the most
+                # useful thing on offer. An answer our own gates rejected is
+                # the opposite: it reads as a confident answer and the reason
+                # it was rejected is that it cannot be trusted, so leaving it
+                # on screen under a caveat shows the reader the exact figure we
+                # just decided they should not rely on.
+                #
+                # Only our gates set a reason; the model's own refusal does not.
+                payload["withheld"] = bool(outcome.reason)
+                # Translated for the person reading it. `outcome.reason` is
+                # written for whoever has to fix it — "the answer cited
+                # nothing, so none of it can be checked" is precise, useful in
+                # Diagnose, and to a visitor reads as the product talking to
+                # itself. The precise reason stays on the console's side of the
+                # wall; a stranger gets a sentence.
+                payload["refusal_reason"] = _for_a_visitor(outcome.reason)
             # The trace is not sent. It names documents a visitor was refused,
             # which is a question about somebody else's access.
             payload.pop("trace", None)
