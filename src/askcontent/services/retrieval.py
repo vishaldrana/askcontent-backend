@@ -393,7 +393,17 @@ class RetrievalService:
         # the answer still looks reasonable. The index's judgement stands for
         # which documents matter; the cheap per-passage similarity, already
         # computed from stored vectors, orders the passages within that.
-        if ranked_by:
+        #
+        # Unless this connector named a local reranker. Choosing one is a
+        # statement that the index's ranking is not the one to trust here —
+        # which is the ordinary case for a corpus we crawled and indexed
+        # ourselves, where the "index" is our own stand-in advertising a
+        # capability it is standing in for. Without this the setting was
+        # accepted, stored, shown on screen and silently pre-empted: a
+        # connector set to `llm` was reranked `pgp:cross-encoder`, and the
+        # only place that said so was the trace.
+        chosen = config.reranker
+        if ranked_by and chosen in (None, "", "index"):
             trace.reranked_by = ", ".join(f"{c}:{r}" for c, r in ranked_by.items())
             ranked = [
                 _Ranked(index=i, score=score)
@@ -887,7 +897,10 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
             window = _significant(
                 text[max(0, match.start() - 120) : match.end() + 120]
             ) or tokens
-            claims.append((citation, value, "currency", window))
+            claims.append((
+                citation, value, "currency", window,
+                _measure("currency", text[match.end():]),
+            ))
 
         for match in _CLAIM.finditer(text):
             value, unit = match.group(1), match.group(2).lower()
@@ -898,13 +911,16 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
             window = _significant(
                 text[max(0, match.start() - 120) : match.end() + 120]
             ) or tokens
-            claims.append((citation, value, unit, window))
+            claims.append((
+                citation, value, unit, window,
+                _measure(unit, text[match.end():]),
+            ))
 
     conflicts: list[Conflict] = []
     seen: set[tuple[str, str]] = set()
 
-    for i, (cite_a, value_a, unit_a, terms_a) in enumerate(claims):
-        for cite_b, value_b, unit_b, terms_b in claims[i + 1 :]:
+    for i, (cite_a, value_a, unit_a, terms_a, measure_a) in enumerate(claims):
+        for cite_b, value_b, unit_b, terms_b, measure_b in claims[i + 1 :]:
             if cite_a.doc_id == cite_b.doc_id:
                 continue
             if unit_a != unit_b or value_a == value_b:
@@ -915,17 +931,68 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
             scope_a, scope_b = _scope_key(cite_a), _scope_key(cite_b)
             if scope_a and scope_b and scope_a != scope_b:
                 continue
+
+            # The same *measure*, not merely the same unit.
+            #
+            # This is the test that turns "two numbers with the same word after
+            # them" into a contradiction. "10 days past due" and "3 business
+            # days before" are both quantities in days and are not in conflict;
+            # they are not even about the same thing. Requiring the words that
+            # qualify the number to match is what tells them apart, and it is
+            # what the old detector was missing — it compared units, found
+            # "days" on both sides, and reported a page about due-date criteria
+            # as disagreeing with a page about autopay timing.
+            if not measure_a or measure_a != measure_b:
+                continue
+
+            # And enough shared context that the two sentences are about one
+            # subject rather than one word. Two overlapping terms is a
+            # coincidence in any passage long enough to be worth citing; the
+            # ratio is what stops a long window from qualifying on volume.
             shared = terms_a & terms_b
-            if len(shared) < 2:
+            overlap = len(shared) / max(1, min(len(terms_a), len(terms_b)))
+            if len(shared) < _CONFLICT_MIN_SHARED or overlap < _CONFLICT_MIN_RATIO:
                 continue
             key = tuple(sorted((cite_a.doc_id, cite_b.doc_id))) + (unit_a,)
             if key[:2] in seen:
                 continue
             seen.add(key[:2])
-            subject = " ".join(sorted(shared)[:4]) + f" ({unit_a})"
+            # Named by what is actually being measured, in the order the
+            # document wrote it. The old subject sorted a bag of shared words
+            # alphabetically and appended the unit, which is how a reader came
+            # to be shown "Sources disagree — days your (days)".
+            subject = measure_a
             conflicts.append(Conflict(subject=subject, citations=(cite_a, cite_b)))
 
     return conflicts
+
+
+#: A contradiction has to survive both: enough shared words, and enough of
+#: them relative to the smaller window. Set by what they have to reject —
+#: two help pages that both happen to say "days" and "your".
+_CONFLICT_MIN_SHARED = 3
+_CONFLICT_MIN_RATIO = 0.25
+
+#: Words that qualify a number without saying what it measures.
+_MEASURE_STOP = frozenset(
+    "the a an of to and or in on for with by from at as is are was were be "
+    "will may can your you our their this that these those it its".split()
+)
+
+
+def _measure(unit: str, following: str) -> str:
+    """What the number measures: its unit plus the words that qualify it.
+
+    "10 days past due" and "3 business days" are both quantities in days and
+    are not comparable — the unit alone cannot tell them apart, and the words
+    around it can. Two are taken because one is usually a preposition and
+    three starts pulling in the next clause.
+    """
+    import re
+
+    words = [w for w in re.findall(r"[a-z]+", following.lower())][:4]
+    tail = [w for w in words if w not in _MEASURE_STOP][:2]
+    return " ".join([unit, *tail]).strip()
 
 
 def _significant(text: str) -> frozenset[str]:
