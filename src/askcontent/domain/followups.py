@@ -59,6 +59,7 @@ def suggest(citations, *, question: str = "", limit: int = 4) -> list[Followup]:
     asked = _terms(question)
     out: list[Followup] = []
     seen: set[str] = set()
+    furniture = _shared_suffix([getattr(c, "title", "") or "" for c in citations])
 
     def add(subject: str, because: str) -> None:
         """`subject` is the heading or title, before it is phrased as a
@@ -70,7 +71,7 @@ def suggest(citations, *, question: str = "", limit: int = 4) -> list[Followup]:
         if asked and terms and len(terms & asked) / len(terms) >= _RESTATEMENT:
             return
 
-        text = _as_question(subject)
+        text = _as_question(subject, furniture)
         key = _normalise(text)
         if not key or key in seen or key == _normalise(question):
             return
@@ -104,21 +105,88 @@ def suggest(citations, *, question: str = "", limit: int = 4) -> list[Followup]:
     return out[:limit]
 
 
-def _as_question(subject: str) -> str:
-    """Turn a heading into something a person would type.
+#: Trailing site furniture on a page title: "Auto loans FAQs | Wells Fargo".
+#: Crawled corpora carry it on every page, and a suggestion that repeats the
+#: company name back at the reader was written by a crawler rather than by
+#: anyone.
+#:
+#: Only after a pipe. Dashes were tried and are not safe: "Credit Card
+#: Questions - Increase Credit Limits" is a title with a dash in it, and
+#: stripping the tail threw away the half that said what the page was about.
+_SUFFIX = re.compile(r"\s*\|[^|]*$")
+
+#: Words that mean the page is a list of questions rather than a subject.
+_FAQ = re.compile(r"\bfaqs?\b", re.IGNORECASE)
+
+
+def _shared_suffix(titles: list[str]) -> str:
+    """The tail that every page carries, which is therefore not about any page.
+
+    Crawled corpora brand every title — "… | Wells Fargo", "… - Wells Fargo".
+    A pipe is safe to strip on sight; a dash is not, because "Credit Card
+    Questions - Increase Credit Limits" is a title with a dash in it and the
+    half after it is the half that says what the page is about.
+
+    So the dash case is decided by evidence rather than by a rule: a tail that
+    appears at the end of two or more of the titles in front of us is the site
+    talking about itself. One that appears once is content.
+    """
+    from collections import Counter
+
+    tails: Counter[str] = Counter()
+    for title in titles:
+        for match in re.finditer(r"[-\u2013\u2014]\s*([^-\u2013\u2014]{2,40})$", title):
+            tails[match.group(1).strip()] += 1
+
+    for tail, count in tails.most_common(1):
+        if count >= 2:
+            return tail
+    return ""
+
+
+def _as_question(subject: str, furniture: str = "") -> str:
+    """Turn a heading into something a person would actually type.
+
+    The frame matters more than it looks. This used to produce "What does the
+    documentation say about Auto loans FAQs | Wells Fargo?" — which is the
+    *system* talking about itself, in the voice of a librarian describing its
+    holdings. Nobody asks a question that way. A reader asks about their own
+    situation, and a suggestion that does not sound like them does not get
+    clicked; worse, it teaches them that this is a search box over documents
+    rather than something to ask.
 
     Headings are already phrased as questions surprisingly often in help
-    content, and re-wrapping one produces "What is How do I reset my password?".
+    content, so those pass through untouched — re-wrapping one produces "What
+    is How do I reset my password?".
     """
-    subject = subject.strip().rstrip(".")
+    subject = _SUFFIX.sub("", subject.strip().rstrip(".")).strip()
+    if furniture:
+        subject = re.sub(
+            r"\s*[-\u2013\u2014]\s*" + re.escape(furniture) + r"\s*$", "", subject
+        ).strip()
+    if not subject:
+        return ""
     if subject.endswith("?"):
         return subject
+
     lowered = subject.lower()
-    if lowered.startswith(("how ", "what ", "when ", "where ", "why ", "who ", "can ", "does ")):
+    if lowered.startswith(
+        ("how ", "what ", "when ", "where ", "why ", "who ", "can ", "does ", "do i ", "is ")
+    ):
         return f"{subject}?"
-    # "Survey Templates" -> "Tell me about Survey Templates" reads as filler.
-    # Naming the corpus's own words back is what makes it feel answerable.
-    return f"What does the documentation say about {subject}?"
+
+    if _FAQ.search(subject):
+        # "Auto loans FAQs" is a page of questions, so the useful thing to ask
+        # is what they are — about the subject, with the label removed.
+        stem = _FAQ.sub("", subject).strip(" -–—:").strip()
+        if stem:
+            return f"What do people usually ask about {stem}?"
+        return "What do people usually ask about?"
+
+    # A noun phrase, asked the way somebody with the problem would ask it.
+    # Deliberately one frame rather than several chosen at random: a list of
+    # suggestions in four different voices reads as four different products.
+    return f"What should I know about {subject}?"
 
 
 def _terms(text: str) -> set[str]:

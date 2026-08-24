@@ -65,3 +65,61 @@ def test_a_rephrasing_of_the_question_is_not_suggested():
         question="How do I add a hyperlink to survey text?",
     )
     assert all("Hyperlink" not in f.question for f in out)
+
+
+def test_a_suggestion_is_asked_in_the_readers_voice():
+    from askcontent.domain.followups import _as_question
+
+    # It used to read "What does the documentation say about X?" — the system
+    # describing its own holdings, in a voice no reader has ever used.
+    assert _as_question("Mobile Features Help") == "What should I know about Mobile Features Help?"
+
+
+def test_site_furniture_is_stripped_from_a_page_title():
+    from askcontent.domain.followups import _as_question
+
+    assert _as_question("Auto loans FAQs | Wells Fargo").endswith("about Auto loans?")
+
+
+def test_a_dash_in_a_title_is_not_furniture():
+    from askcontent.domain.followups import _as_question
+
+    # Tried and reverted: stripping after a dash threw away the half of the
+    # title that said what the page was about.
+    assert "Increase Credit Limits" in _as_question("Credit Card Questions - Increase Credit Limits")
+
+
+def test_a_page_of_questions_is_asked_about_as_one():
+    from askcontent.domain.followups import _as_question
+
+    assert _as_question("Personal Loan FAQs") == "What do people usually ask about Personal Loan?"
+
+
+def test_a_heading_already_phrased_as_a_question_is_left_alone():
+    from askcontent.domain.followups import _as_question
+
+    assert _as_question("How do I reset my password?") == "How do I reset my password?"
+
+
+def test_branding_after_a_dash_is_stripped_when_it_repeats():
+    from askcontent.domain.followups import suggest
+
+    class Cite:
+        heading_path = ()
+
+        def __init__(self, title):
+            self.title = title
+
+    # "- Wells Fargo" ends three of these, so it is the site talking about
+    # itself. "- Increase Credit Limits" ends one, so it is content.
+    made = suggest(
+        [
+            Cite("Credit Card Questions - Increase Credit Limits - Wells Fargo"),
+            Cite("Call Us - Wells Fargo"),
+            Cite("Rates - Wells Fargo"),
+        ],
+        question="how do I raise my limit",
+    )
+    text = " ".join(f.question for f in made)
+    assert "Wells Fargo?" not in text
+    assert "Increase Credit Limits" in text
