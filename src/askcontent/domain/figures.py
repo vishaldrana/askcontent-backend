@@ -31,6 +31,7 @@ Deliberately conservative, because a false positive rejects a good answer:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 #: A figure as a model writes one: 42, 1,284, 3.5, 32%, -17, £12.
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
@@ -38,11 +39,24 @@ _PAGE_MARKER = re.compile(r"\[page\]", re.IGNORECASE)
 _DATA_MARKER = re.compile(r"\[d\d{1,2}\]", re.IGNORECASE)
 _PASSAGE_MARKER = re.compile(r"\[\d{1,2}\](?!\()")
 
-#: Sentence-ish. Splitting on terminators followed by space is wrong in the
-#: usual ways (abbreviations, decimals) and right enough here: a marker binds
-#: to the clause it ends, and over-splitting only makes the check stricter
-#: about which numbers sit with which marker.
-_SENTENCE = re.compile(r"(?<=[.!?:])\s+|\n+")
+#: Sentence-ish, with the separator kept so the remainder can be rejoined and
+#: still read as prose. Splitting on terminators is wrong in the usual ways
+#: (abbreviations, decimals) and right enough here: a marker binds to the
+#: clause it ends, and over-splitting only makes the check stricter about which
+#: numbers sit with which marker.
+_SENTENCE = re.compile(r"((?<=[.!?:])\s+|\n+)")
+
+
+def _split(text: str) -> list[tuple[str, str]]:
+    """Sentences paired with the whitespace that followed each."""
+    parts = _SENTENCE.split(text)
+    out: list[tuple[str, str]] = []
+    for i in range(0, len(parts), 2):
+        body = parts[i]
+        gap = parts[i + 1] if i + 1 < len(parts) else ""
+        if body or gap:
+            out.append((body, gap))
+    return out
 
 
 def _normalise(value: str) -> str:
@@ -66,20 +80,76 @@ def unsupported_figures(
     answerer was given them — so "in the sources" means "in what it was shown",
     not "true somewhere".
     """
+    return strip_unsupported(answer, sources=sources, question=question).figures
+
+
+@dataclass(frozen=True)
+class Stripped:
+    """An answer with its unsupported sentences taken out.
+
+    Removing a sentence rather than the whole answer is a deliberate choice
+    about severity. The failure is almost always one trailing clause — "42,
+    down from 51, *a decrease of 9 points*" — and rejecting the answer costs
+    the reader everything to spare them a redundant figure they could have
+    worked out themselves.
+
+    Two rules keep the edit honest. What is removed is reported, because an
+    answer silently different from what the model wrote is its own kind of
+    unattributable. And if removing leaves nothing that carries a marker,
+    there is no answer left to keep — the caller withholds it, exactly as
+    before.
+    """
+
+    kept: str
+    removed: tuple[str, ...] = ()
+    figures: tuple[str, ...] = ()
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.removed)
+
+    @property
+    def survives(self) -> bool:
+        """Something is left, and it still says where it came from."""
+        if not self.kept.strip():
+            return False
+        return bool(
+            _PASSAGE_MARKER.search(self.kept)
+            or _PAGE_MARKER.search(self.kept)
+            or _DATA_MARKER.search(self.kept)
+        )
+
+
+def strip_unsupported(answer: str, *, sources: str, question: str = "") -> Stripped:
+    """Take out the sentences that credit a figure to something it is not in."""
     if not answer.strip():
-        return ()
+        return Stripped(kept=answer)
 
     allowed = _figures(sources) | _figures(question)
-    found: list[str] = []
+    kept: list[str] = []
+    removed: list[str] = []
+    figures: list[str] = []
 
-    for sentence in _SENTENCE.split(answer):
+    for sentence, gap in _split(answer):
         marked = bool(_PAGE_MARKER.search(sentence) or _DATA_MARKER.search(sentence))
         if not marked or _PASSAGE_MARKER.search(sentence):
+            kept.append(sentence + gap)
             continue
+
         # The markers themselves carry digits — [d1] is not a claim about 1.
         body = _DATA_MARKER.sub(" ", _PAGE_MARKER.sub(" ", sentence))
-        for figure in _figures(body):
-            if figure not in allowed and figure not in found:
-                found.append(figure)
+        offending = [f for f in _figures(body) if f not in allowed]
+        if not offending:
+            kept.append(sentence + gap)
+            continue
 
-    return tuple(found)
+        removed.append(sentence.strip())
+        for figure in offending:
+            if figure not in figures:
+                figures.append(figure)
+
+    return Stripped(
+        kept="".join(kept).strip(),
+        removed=tuple(removed),
+        figures=tuple(figures),
+    )

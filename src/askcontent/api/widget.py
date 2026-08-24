@@ -433,6 +433,19 @@ async def widget_ask(
                 #
                 # Only our gates set a reason; the model's own refusal does not.
                 payload["withheld"] = bool(outcome.reason)
+
+            # A sentence the figure gate removed. The answer stands; the
+            # sentence that credited a worked-out number to something it was
+            # not in does not — and the reader is told, because an answer
+            # silently different from what was written is its own kind of
+            # unattributable.
+            if outcome is not None and outcome.revised is not None:
+                payload["revised"] = outcome.revised
+                payload["notices"] = list(payload.get("notices") or []) + [
+                    "One sentence was left out: it worked out a figure rather "
+                    "than reading one, and a number nobody can look up is not "
+                    "one to act on."
+                ]
                 # Translated for the person reading it. `outcome.reason` is
                 # written for whoever has to fix it — "the answer cited
                 # nothing, so none of it can be checked" is precise, useful in

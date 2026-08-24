@@ -75,3 +75,36 @@ def test_spelled_out_numbers_are_not_examined():
 
 def test_nothing_to_check_when_there_is_no_answer():
     assert unsupported_figures("", sources=PAGE) == ()
+
+
+def test_the_answer_survives_one_bad_sentence():
+    from askcontent.domain.figures import strip_unsupported
+
+    result = strip_unsupported(
+        "Your NPS is 42, against 51 last quarter [page]. That is a fall of 9 points [page].",
+        sources=PAGE,
+    )
+    assert result.kept == "Your NPS is 42, against 51 last quarter [page]."
+    assert result.removed == ("That is a fall of 9 points [page].",)
+    assert result.figures == ("9",)
+    assert result.survives
+
+
+def test_an_answer_that_is_only_a_bad_sentence_does_not_survive():
+    from askcontent.domain.figures import strip_unsupported
+
+    result = strip_unsupported("Your response rate is 32% [page].", sources=PAGE)
+    assert result.kept == ""
+    assert not result.survives
+
+
+def test_what_is_left_must_still_say_where_it_came_from():
+    from askcontent.domain.figures import strip_unsupported
+
+    # The surviving sentence carries no marker, so there is no answer left to
+    # keep — only prose that cannot be checked.
+    result = strip_unsupported(
+        "Here is what I found. Your rate is 32% [page].", sources=PAGE
+    )
+    assert result.kept == "Here is what I found."
+    assert not result.survives

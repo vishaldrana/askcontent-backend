@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 
-from ..domain.figures import unsupported_figures
+from ..domain.figures import strip_unsupported
 from ..domain.groundedness import assess
 from ..ports.answerer import AnswerChunk, Passage
 
@@ -34,9 +34,16 @@ class AnswerOutcome:
     #: Datapoint numbers the answer used.
     used_data: tuple[int, ...] = ()
     #: Figures attributed to the page or a live reading that are in neither.
-    #: Always empty in practice; non-empty means the answer did arithmetic and
-    #: presented the result as something the reader could look up.
+    #: Non-empty means the answer did arithmetic and presented the result as
+    #: something the reader could look up.
     derived: tuple[str, ...] = ()
+    #: The sentences taken out because of it. Reported, not hidden: an answer
+    #: silently different from what the model wrote is its own kind of
+    #: unattributable.
+    removed: tuple[str, ...] = ()
+    #: The answer as the reader should see it, when that differs from what was
+    #: streamed. `None` when nothing was taken out.
+    revised: str | None = None
     #: Set when the answerer itself failed — a timeout, a rate limit, an
     #: outage.
     #:
@@ -162,7 +169,7 @@ class AnsweringService:
                 # reading. A derived one is a guess at a definition presented
                 # as a reading — the reader looks at the screen it names and
                 # cannot find it.
-                derived = unsupported_figures(
+                stripped = strip_unsupported(
                     said,
                     sources="\n".join(
                         ([page.render()] if has_page else [])
@@ -170,6 +177,14 @@ class AnsweringService:
                     ),
                     question=question,
                 )
+                # Severity: take out the sentence, keep the answer. The failure
+                # is almost always one trailing clause, and rejecting the whole
+                # answer costs the reader everything to spare them a redundant
+                # figure. The exception is an answer that does not survive the
+                # edit — nothing left, or nothing left that says where it came
+                # from — which is withheld exactly as before.
+                derived = stripped.figures
+                gutted = stripped.changed and not stripped.survives
                 uncited = (
                     bool(said.strip())
                     and not chunk.cited
@@ -180,13 +195,15 @@ class AnsweringService:
                     supported=(
                         chunk.supported and not invented and not uncited
                         and not fabricated_page and not fabricated_data
-                        and not derived
+                        and not gutted
                     ),
                     cited=chunk.cited,
                     invented=invented,
                     used_page=page_claimed,
                     used_data=tuple(sorted(set(chunk.used_data) & offered_data)),
                     derived=derived,
+                    removed=stripped.removed,
+                    revised=stripped.kept if stripped.changed else None,
                     reason=(
                         "the answer attributed something to a page that was "
                         "never supplied"
@@ -195,8 +212,9 @@ class AnsweringService:
                         f"{', '.join(f'd{n}' for n in fabricated_data)}"
                         if fabricated_data else
                         f"the answer worked out figures that are not on the page "
-                        f"or in the readings it credited: {', '.join(derived)}"
-                        if derived else
+                        f"or in the readings it credited, and nothing was left "
+                        f"once they were removed: {', '.join(derived)}"
+                        if gutted else
                         "the answer cited nothing, so none of it can be checked"
                         if uncited else None
                     ),

@@ -268,3 +268,27 @@ def test_a_quoted_figure_still_passes_the_gate():
     )
     assert outcome.supported
     assert outcome.derived == ()
+
+
+def test_a_partly_derived_answer_keeps_the_part_that_was_read():
+    answerer = _Fake(
+        "Your NPS is 42, against 51 last quarter [d1][d2]. That is a fall of 9 points [d1][d2].",
+        used_data=(1, 2),
+    )
+    _, outcome = _answer(
+        answerer, "what is my NPS this quarter", [_Citation()],
+        data=_set_with_previous(),
+    )
+    assert outcome.supported
+    assert outcome.derived == ("9",)
+    assert outcome.removed == ("That is a fall of 9 points [d1][d2].",)
+    assert outcome.revised == "Your NPS is 42, against 51 last quarter [d1][d2]."
+
+
+def _set_with_previous():
+    fields = (FieldMap(path="summary.nps", label="NPS"),
+              FieldMap(path="summary.previous", label="NPS last quarter"))
+    points = extract({"summary": {"nps": 42, "previous": 51}}, fields,
+                     source="Survey analytics", key="srv_8f2a11c4",
+                     fetched_at=NOW, ttl_seconds=60)
+    return DatapointSet(source="Survey analytics", key="srv_8f2a11c4", points=points)
