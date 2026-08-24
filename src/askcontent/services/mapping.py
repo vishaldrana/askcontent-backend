@@ -272,6 +272,29 @@ def validate_map(
     )
 
 
+#: How sources spell the classifications we have four words for.
+#:
+#: Suggested with the sensitivity rule rather than left to the caller, because
+#: leaving it out does not fail — it silently classifies every document
+#: `internal`. A connector whose ceiling is `public` then admits nothing at
+#: all, and the corpus screen reports sixteen documents "above sensitivity
+#: ceiling: internal > ceiling public" over a corpus of public help pages.
+#:
+#: A deployment whose source spells them differently edits the rule; what it
+#: cannot do is end up with no mapping and not notice.
+DEFAULT_SENSITIVITY_VALUES = {
+    "Public": "public",
+    "public": "public",
+    "Internal": "internal",
+    "Internal Use Only": "internal",
+    "internal": "internal",
+    "Confidential": "confidential",
+    "confidential": "confidential",
+    "Restricted": "restricted",
+    "restricted": "restricted",
+}
+
+
 def suggest_map(kb_id: str, field_names: list[str]) -> FieldMap:
     """A starting point for the mapping editor, never an applied default.
 
@@ -318,7 +341,11 @@ def suggest_map(kb_id: str, field_names: list[str]) -> FieldMap:
         FieldRule(target="space", source=find("space", "team", "domain", "site", "practice")),
         FieldRule(target="owner", source=find("owner", "maintainer", "custodian", "accountable")),
         FieldRule(target="labels", source=labels_source, coercion=Coercion.CSV_LIST),
-        FieldRule(target="sensitivity", source=find("classification", "level", "infoclass", "handling")),
+        FieldRule(
+            target="sensitivity",
+            source=find("classification", "level", "infoclass", "handling"),
+            value_map=DEFAULT_SENSITIVITY_VALUES,
+        ),
         FieldRule(target="acl_principals", source=find("acl", "readgroups", "entitlement", "permitted"), coercion=Coercion.STRING_LIST),
     ]
     return FieldMap(kb_id=kb_id, rules=tuple(r for r in rules if r.source))

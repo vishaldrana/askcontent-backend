@@ -14,7 +14,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from ..config import settings
 from ..domain.urls import Rung
@@ -900,6 +900,161 @@ def scope_facets(slug: str) -> dict:
         "spaces": [{"value": k, "documents": v} for k, v in sorted(spaces.items())],
         "labels": [{"value": k, "documents": v} for k, v in sorted(labels.items())],
     }
+
+
+class ConnectorCreate(BaseModel):
+    """What the wizard collects, and nothing else.
+
+    A closed grammar, like the scope it carries: every field here is one the
+    six steps ask for, and a connector cannot be created with a property no
+    step showed somebody.
+    """
+
+    kb_id: str
+    name: str
+    business_group: str = ""
+    #: The part of the source this connector may ever see. Empty means the
+    #: whole knowledgebase, which is a decision the wizard makes somebody
+    #: confirm rather than a default it applies quietly.
+    space: str = ""
+    path_prefix: str = ""
+    exclude: list[str] = []
+    sensitivity_ceiling: str = "internal"
+    groups: list[str] = []
+    #: Draft unless somebody says otherwise. A connector that goes live the
+    #: moment it is created is one nobody probed.
+    state: str = "draft"
+
+
+@router.post("/api/connectors")
+def create_connector(body: ConnectorCreate) -> dict:
+    """Register a knowledgebase as a connector.
+
+    Onboarding without a code change was the promise on the wizard's first
+    screen from the beginning, and until now the last four steps of that
+    wizard said "not wired up yet" — so the promise held only for the
+    connectors somebody had already written into the seed list.
+    """
+    from ..domain.documents import Sensitivity
+    from ..domain.scope import KnowledgeScope, SourceRoot
+    from ..services.mapping import suggest_map
+    from ..services.registry import (
+        AccessBinding,
+        Connector,
+        ConnectorState,
+        RetrievalConfig,
+    )
+
+    platform = _platform()
+
+    known = {k.kb_id for k in platform.index.list_knowledgebases()}
+    if body.kb_id not in known:
+        raise HTTPException(404, f"the index does not have a knowledgebase called {body.kb_id}")
+
+    slug = _slug_for(body.name, body.kb_id)
+    try:
+        platform.registry.get(slug)
+    except KeyError:
+        pass
+    else:
+        raise HTTPException(409, f"a connector called {slug} already exists")
+
+    descriptor = platform.index.describe(body.kb_id)
+    _register_knowledgebase(descriptor)
+    mapped = suggest_map(body.kb_id, [f.name for f in descriptor.fields])
+
+    roots: tuple[SourceRoot, ...] = ()
+    if body.space:
+        roots = (SourceRoot(kind="space", value=body.space),)
+    elif body.path_prefix:
+        roots = (SourceRoot(kind="path_prefix", value=body.path_prefix),)
+
+    if not roots:
+        # An empty root set selects nothing, not everything (CNT-SCP). A
+        # connector created without one would look configured and answer
+        # nothing, which is the failure the Corpus screen exists to explain
+        # and a worse first experience than a refusal here.
+        raise HTTPException(
+            400,
+            "choose a space or a path prefix — a scope with no root selects "
+            "nothing, and the connector would answer nothing.",
+        )
+
+    try:
+        ceiling = Sensitivity(body.sensitivity_ceiling)
+    except ValueError:
+        raise HTTPException(400, f"unknown sensitivity {body.sensitivity_ceiling}") from None
+
+    connector = Connector(
+        connector_id=slug,
+        name=body.name.strip() or body.kb_id,
+        business_group=body.business_group.strip(),
+        kb_id=body.kb_id,
+        field_map=mapped,
+        scope=KnowledgeScope(
+            roots=roots,
+            exclude=tuple(body.exclude),
+            sensitivity_ceiling=ceiling,
+        ),
+        access=AccessBinding(groups=tuple(body.groups)),
+        retrieval=RetrievalConfig(),
+        state=ConnectorState(body.state),
+    )
+    platform.registry.put(connector, actor="console", note="created from the wizard")
+    return {"connector_id": slug, "state": connector.state, "kb_id": body.kb_id}
+
+
+def _register_knowledgebase(descriptor) -> None:
+    """Copy what the index says about a knowledgebase into our own catalog.
+
+    Done here because a knowledgebase can appear in the index at any time —
+    a crawl finishing is the ordinary case — and the connector registry needs a
+    row to point at. Until now that row came only from `askcontent.cli seed`,
+    so a knowledgebase crawled from the console could not be connected from the
+    console: the wizard offered it, and creating it failed on a missing row
+    nobody could see.
+    """
+    from ..db import models as m
+
+    with _sessions()() as session:
+        org = _org(session)
+        row = session.scalars(
+            select(m.Knowledgebase).where(
+                m.Knowledgebase.org_id == org,
+                m.Knowledgebase.kb_id == descriptor.kb_id,
+            )
+        ).one_or_none()
+        if row is None:
+            row = m.Knowledgebase(org_id=org, kb_id=descriptor.kb_id)
+            session.add(row)
+        row.name = descriptor.name
+        row.description = descriptor.description
+        row.document_count = descriptor.document_count
+        row.last_indexed_at = descriptor.last_indexed_at
+        row.embedding_model = descriptor.embedding_model
+        row.embedding_dimension = descriptor.embedding_dimension
+        row.exposes_acl = descriptor.exposes_acl
+        row.observed_fields = {
+            f.name: {"coverage": f.coverage, "samples": list(f.samples)}
+            for f in descriptor.fields
+        }
+        session.commit()
+
+
+def _slug_for(name: str, kb_id: str) -> str:
+    """`cn-` plus the name, or the knowledgebase when the name gives nothing.
+
+    Derived rather than typed, because the identifier appears in every URL and
+    every citation and a person choosing one under time pressure chooses
+    badly. Derived from the *name* rather than the kb id so two connectors
+    over one knowledgebase — a narrow one and a broad one — do not collide.
+    """
+    import re
+
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not base:
+        base = re.sub(r"^kb-", "", kb_id)
+    return f"cn-{base[:48].strip('-')}"
 
 
 class ContextSourcePatch(BaseModel):
