@@ -412,8 +412,16 @@ async def widget_ask(
             # A source that was called and failed is named, never swallowed. An
             # answer that silently omits the figures it was meant to include
             # looks complete and is wrong about the one thing that was asked.
+            # `alerts` and `notices` are separated because the reader has to
+            # do different things with them.
+            #
+            # An alert changes how the answer should be read — the live figures
+            # were unreachable, a sentence was removed — so it is shown beside
+            # the answer. A notice is a remark about the evidence ("best
+            # supporting evidence is from 2022"), which belongs with the
+            # evidence, folded away with it until somebody wants to check.
             if data is not None and data.error:
-                payload["notices"] = list(payload.get("notices") or []) + [data.notice()]
+                payload["alerts"] = list(payload.get("alerts") or []) + [data.notice()]
             if outcome is not None and not outcome.supported:
                 # Nothing supported the answer, so nothing may be shown as
                 # supporting it — and the widget refuses to render prose with
@@ -441,7 +449,7 @@ async def widget_ask(
             # unattributable.
             if outcome is not None and outcome.revised is not None:
                 payload["revised"] = outcome.revised
-                payload["notices"] = list(payload.get("notices") or []) + [
+                payload["alerts"] = list(payload.get("alerts") or []) + [
                     "One sentence was left out: it worked out a figure rather "
                     "than reading one, and a number nobody can look up is not "
                     "one to act on."
