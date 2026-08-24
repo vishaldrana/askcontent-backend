@@ -1009,6 +1009,8 @@ def list_models(kind: str = "answer") -> dict:
 class AnsweringPatch(BaseModel):
     answer_model: str | None = None
     answer_tone: str | None = None
+    reranker: str | None = None
+    rerank_model: str | None = None
 
 
 @router.get("/api/connectors/{slug}/answering")
@@ -1017,13 +1019,17 @@ def get_answering(slug: str) -> dict:
 
     with _sessions()() as session:
         row = session.execute(text(f"""
-            SELECT answer_model, answer_tone FROM {S}.connector
-             WHERE org_id = :o AND slug = :s
+            SELECT answer_model, answer_tone, reranker, rerank_model
+              FROM {S}.connector WHERE org_id = :o AND slug = :s
         """), {"o": _org(session), "s": slug}).mappings().one()
+
+    from ..adapters.rerankers.pool import CHOICES
+
     return dict(row) | {
         "presets": presets(),
         "default_tone": DEFAULT,
         "max_chars": MAX_CHARS,
+        "rerankers": list(CHOICES),
     }
 
 
@@ -1046,6 +1052,13 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
             f"here pushes the passages out of the model's attention.",
         )
 
+    from ..adapters.rerankers.pool import CHOICES
+
+    reranker = (body.reranker or "").strip() or None
+    if reranker is not None and reranker not in CHOICES:
+        raise HTTPException(400, f"reranker must be one of {', '.join(CHOICES)}")
+    rerank_model = (body.rerank_model or "").strip() or None
+
     model = (body.answer_model or "").strip() or None
     with _sessions()() as session:
         org = _org(session)
@@ -1060,11 +1073,22 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
             UPDATE {S}.connector
                SET answer_model = :m,
                    answer_tone = coalesce(:t, answer_tone),
+                   reranker = :rr,
+                   rerank_model = :rm,
                    updated_at = now()
              WHERE org_id = :o AND slug = :s
-        """), {"m": model, "t": tone, "o": org, "s": slug})
+        """), {"m": model, "t": tone, "rr": reranker, "rm": rerank_model,
+               "o": org, "s": slug})
         session.commit()
-    return {"answer_model": model, "answer_tone": tone}
+
+    # The pools are keyed by what was just changed.
+    from ..adapters.rerankers.pool import forget
+
+    forget()
+    return {
+        "answer_model": model, "answer_tone": tone,
+        "reranker": reranker, "rerank_model": rerank_model,
+    }
 
 
 def _answering_for(slug: str) -> tuple[str | None, str]:

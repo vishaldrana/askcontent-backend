@@ -112,7 +112,14 @@ class PgRegistry:
                 groups=tuple(row.access_groups or ()),
                 declared_access_class=row.declared_access_class,
             ),
-            retrieval=RetrievalConfig.model_validate(row.retrieval_config or {}),
+            # The two reranker columns are read alongside the JSON config
+            # rather than inside it: they are set from a different screen, and
+            # a value that lives in two places disagrees with itself the first
+            # time one of them is written without the other.
+            retrieval=RetrievalConfig.model_validate(
+                (row.retrieval_config or {})
+                | {"reranker": row.reranker, "rerank_model": row.rerank_model}
+            ),
             authority_rules=tuple(
                 AuthorityRule(
                     space=a.space, path_prefix=a.path_prefix, label=a.label,

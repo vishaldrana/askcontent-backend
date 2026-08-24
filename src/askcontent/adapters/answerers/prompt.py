@@ -49,8 +49,13 @@ passages do happen to say.
 4. Quote figures, dates, thresholds, names and identifiers exactly as written. \
 Never round, convert or restate them.
 
-5. If passages disagree, say so and attribute each position to its passage. \
-Do not silently prefer one.
+5. If passages genuinely disagree — they state different figures, dates or \
+rules for the same thing — say so in the answer and attribute each position to \
+its passage, in a sentence a reader can act on: "The FAQ says 30 days [2]; the \
+policy page says 60 [5]. The policy page is newer." Do not silently prefer one, \
+and do not manufacture a disagreement out of two passages that simply cover \
+different ground — most passages that mention the same word are not in \
+conflict, they are about different things.
 
 6. Formatting is how you present what the passages give you. It is never a \
 reason to withhold an answer. If the passages support two steps and not six, \
