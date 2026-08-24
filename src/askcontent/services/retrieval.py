@@ -171,12 +171,29 @@ class Evidence(BaseModel):
 
 
 class RetrievalService:
-    def __init__(self, index, repository, embedder, reranker, passages) -> None:
+    def __init__(self, index, repository, embedder, reranker, passages, rerankers=None) -> None:
         self.index = index
         self.repository = repository
         self.embedder = embedder
         self.reranker = reranker
+        #: Resolves a connector's reranker choice to an implementation.
+        #: Injected, because choosing one means naming an adapter and this
+        #: layer is not allowed to — the same rule as the answerer pool.
+        self._rerankers = rerankers
         self.passages = passages
+
+    def _reranker_for(self, connector):
+        """The reranker this connector asked for, or the deployment's own.
+
+        Read off the connector rather than the environment because a single
+        deployment has both kinds at once: connectors over the enterprise
+        index, where the platform reranked during search, and connectors over
+        content we crawled ourselves, where nobody else holds the fragments.
+        """
+        if self._rerankers is None:
+            return self.reranker
+        config = connector.retrieval
+        return self._rerankers(config.reranker, config.rerank_model, self.reranker)
 
     # -- ② compile ---------------------------------------------------------
 
@@ -391,10 +408,11 @@ class RetrievalService:
                 trace, candidates, citations, conflicts, notices, started, config
             )
 
-        trace.reranked_by = f"local:{self.reranker.reranker_id}"
+        reranker = self._reranker_for(connector)
+        trace.reranked_by = f"local:{reranker.reranker_id}"
         texts = [chunk.embed_text for chunk, _, _, _ in passage_pool]
         try:
-            ranked = self.reranker.rerank(spec.question, texts)
+            ranked = reranker.rerank(spec.question, texts)
         except Exception as exc:  # noqa: BLE001
             # Degrade to fusion order rather than failing the answer
             # (CNT-RNK-04).

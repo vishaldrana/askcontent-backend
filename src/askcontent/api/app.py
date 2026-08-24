@@ -481,15 +481,15 @@ def diagnose(connector_id: str, body: dict) -> dict:
     # one that ships. Composing it here makes this screen a test harness rather
     # than a window onto an intermediate stage.
     if body.get("answer", True):
-        from ..domain.followups import suggest as suggest_followups
+        from .extra import _followups
         from .extra import _answering_for, _instructions_for, _run_answer
 
         text_out, outcome = "", None
-        answer_model, answer_detail = _answering_for(connector_id)
+        answer_model, answer_tone = _answering_for(connector_id)
         for chunk, result in _run_answer(
             platform, spec.question, evidence.citations, (),
             _instructions_for(connector_id), evidence.trace.synonyms,
-            None, None, answer_detail, answer_model,
+            None, None, answer_tone, answer_model,
         ):
             if result is not None:
                 outcome = result
@@ -507,10 +507,7 @@ def diagnose(connector_id: str, body: dict) -> dict:
             "model": platform.answering.answerer.model_id,
         }
         payload["followups"] = (
-            [
-                {"question": f.question, "because": f.because}
-                for f in suggest_followups(evidence.citations, question=spec.question)
-            ]
+            _followups(platform, evidence.citations, spec.question)
             if outcome and outcome.supported
             else []
         )

@@ -226,8 +226,16 @@ class Connector(Base, PkMixin, TenantMixin, TimestampMixin):
     #: Which catalogued model answers for this connector. Null is the
     #: deployment default, so an unset column keeps the previous behaviour.
     answer_model: Mapped[str | None] = mapped_column(String(120))
-    #: How much of what the passages support the answer should say.
-    answer_detail: Mapped[str] = mapped_column(String(16), default="full", nullable=False)
+    #: How the assistant should sound, in the words of whoever runs it. Free
+    #: text, because nothing in the system reasons about the value — it is
+    #: passed to a model as English.
+    answer_tone: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    #: Which reranker this connector uses. Null is the deployment default.
+    #: Set per connector because the right answer depends on where the content
+    #: came from, and one process serves both kinds — see migration 0022.
+    reranker: Mapped[str | None] = mapped_column(String(32))
+    #: The model the reranker uses, where it takes one.
+    rerank_model: Mapped[str | None] = mapped_column(String(120))
     sensitivity_ceiling: Mapped[str] = mapped_column(String(16), default="internal", nullable=False)
 
     access_groups: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)

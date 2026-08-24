@@ -102,7 +102,7 @@ class AnsweringService:
         synonyms: dict[str, tuple[str, ...]] | None = None,
         page=None,
         data=None,
-        detail: str | None = None,
+        tone: str | None = None,
         model: str | None = None,
     ) -> AsyncIterator[tuple[str, AnswerOutcome | None]]:
         """Yield `(text, None)` while writing, then one final `("", outcome)`."""
@@ -154,7 +154,7 @@ class AnsweringService:
         async for chunk in self._for(model).stream(
             question=question, passages=passages, history=history,
             instructions=instructions, page=page if has_page else None,
-            data=data if has_data else None, detail=detail,
+            data=data if has_data else None, tone=tone,
         ):
             if chunk.text:
                 said += chunk.text

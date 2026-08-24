@@ -64,7 +64,7 @@ class _Fake:
         self.saw_page = None
 
     async def stream(self, *, question, passages, history=(), instructions="",
-                     page=None, data=None, detail=None) -> AsyncIterator[AnswerChunk]:
+                     page=None, data=None, tone=None) -> AsyncIterator[AnswerChunk]:
         self.saw_page = page
         yield AnswerChunk(text=self._text)
         yield AnswerChunk(done=True, supported=True, cited=self._cited,

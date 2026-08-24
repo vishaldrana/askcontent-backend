@@ -72,7 +72,7 @@ class ExtractiveAnswerer(Answerer):
         # from documents only is the right degradation.
         page=None,
         data=None,
-        detail=None,
+        tone=None,
     ) -> AsyncIterator[AnswerChunk]:
         asked = _terms(question)
         if not passages or not asked:

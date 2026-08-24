@@ -902,17 +902,70 @@ def scope_facets(slug: str) -> dict:
     }
 
 
-#: What a fresh deployment can answer with. Seeded rather than left empty
-#: because an empty catalogue is a dropdown with nothing in it, and the first
-#: question anybody has is "which ones do you support" — which is exactly what
-#: this list is.
+#: What a fresh deployment can answer with.
+#:
+#: Seeded from what the configured key could actually reach when this was
+#: written — each id below was listed by the provider and answered a test
+#: request. That matters more than it sounds: a catalogue of plausible model
+#: names is a dropdown where some entries fail at the first question, and the
+#: person who picked one has no way to tell a bad model from a bad corpus.
+#:
+#: It goes stale anyway, which is what `/api/models/available` is for: it asks
+#: the provider what this key can reach *now*, so adding this year's model is
+#: a click rather than a release.
 SEED_MODELS = [
-    ("openai", "gpt-4.1-2025-04-14", "GPT-4.1", "The default. Best balance for grounded answers.", True),
-    ("openai", "gpt-4.1-mini-2025-04-14", "GPT-4.1 mini", "Faster and cheaper; shorter answers.", False),
-    ("openai", "gpt-4o-2024-11-20", "GPT-4o", "Older, still capable.", False),
-    ("anthropic", "claude-sonnet-4-5", "Claude Sonnet 4.5", "Needs an Anthropic key.", False),
+    ("openai", "gpt-5.6-terra", "GPT-5.6 Terra", "Current generation. The default.", True),
+    ("openai", "gpt-5.6-sol", "GPT-5.6 Sol", "Current generation, a sibling of Terra.", False),
+    ("openai", "gpt-5.6-luna", "GPT-5.6 Luna", "Current generation, a sibling of Terra.", False),
+    ("openai", "gpt-5.5", "GPT-5.5", "Previous generation.", False),
+    ("openai", "gpt-5.4-mini", "GPT-5.4 mini", "Smaller and cheaper; shorter answers.", False),
+    ("openai", "gpt-4.1-2025-04-14", "GPT-4.1", "Older, pinned, and known to work.", False),
+    ("anthropic", "claude-opus-5", "Claude Opus 5", "Needs an Anthropic key.", False),
+    ("anthropic", "claude-sonnet-5", "Claude Sonnet 5", "Needs an Anthropic key.", False),
     ("anthropic", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast; needs an Anthropic key.", False),
 ]
+
+#: Families worth offering. The provider lists transcription, image and
+#: embedding models on the same endpoint, and a dropdown that offers
+#: `gpt-4o-mini-tts` for answering is a dropdown nobody trusts.
+_CHAT_FAMILIES = ("gpt-", "o1", "o3", "o4", "claude")
+_NOT_CHAT = ("-tts", "-transcribe", "-audio", "-realtime", "-search", "-image",
+             "-codex", "instruct", "embedding", "moderation", "dall-e", "whisper",
+             "-diarize", "chatgpt-")
+
+
+@router.get("/api/models/available")
+def available_models() -> dict:
+    """What the configured key can actually reach, asked of the provider.
+
+    So that adding this year's model is a click rather than a release — and so
+    that nobody adds one by typing an id that does not exist, which fails at
+    the first question with an error the person who typed it never sees.
+    """
+    import urllib.error
+    import urllib.request
+
+    from ..config import settings
+
+    if not settings.llm_api_key:
+        return {"models": [], "note": "no API key is configured for this deployment"}
+
+    base = (settings.llm_base_url or "https://api.openai.com/v1").rstrip("/")
+    request = urllib.request.Request(f"{base}/models")
+    request.add_header("authorization", f"Bearer {settings.llm_api_key}")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        return {"models": [], "note": f"the provider did not answer: {exc}"}
+
+    ids = sorted(str(m.get("id", "")) for m in payload.get("data", []))
+    usable = [
+        i for i in ids
+        if any(i.startswith(f) for f in _CHAT_FAMILIES)
+        and not any(bad in i for bad in _NOT_CHAT)
+    ]
+    return {"models": usable, "note": ""}
 
 
 @router.get("/api/models")
@@ -955,19 +1008,23 @@ def list_models(kind: str = "answer") -> dict:
 
 class AnsweringPatch(BaseModel):
     answer_model: str | None = None
-    answer_detail: str | None = None
+    answer_tone: str | None = None
 
 
 @router.get("/api/connectors/{slug}/answering")
 def get_answering(slug: str) -> dict:
-    from ..domain.answer_detail import LEVELS
+    from ..domain.answer_tone import DEFAULT, MAX_CHARS, presets
 
     with _sessions()() as session:
         row = session.execute(text(f"""
-            SELECT answer_model, answer_detail FROM {S}.connector
+            SELECT answer_model, answer_tone FROM {S}.connector
              WHERE org_id = :o AND slug = :s
         """), {"o": _org(session), "s": slug}).mappings().one()
-    return dict(row) | {"levels": list(LEVELS)}
+    return dict(row) | {
+        "presets": presets(),
+        "default_tone": DEFAULT,
+        "max_chars": MAX_CHARS,
+    }
 
 
 @router.put("/api/connectors/{slug}/answering")
@@ -979,11 +1036,15 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
     settings screen says otherwise — the kind of disagreement nobody finds
     until they are comparing two answers and cannot explain the difference.
     """
-    from ..domain.answer_detail import LEVELS
+    from ..domain.answer_tone import MAX_CHARS
 
-    detail = body.answer_detail
-    if detail is not None and detail not in LEVELS:
-        raise HTTPException(400, f"detail must be one of {', '.join(LEVELS)}")
+    tone = body.answer_tone
+    if tone is not None and len(tone) > MAX_CHARS:
+        raise HTTPException(
+            400,
+            f"keep the tone under {MAX_CHARS} characters — a style guide pasted "
+            f"here pushes the passages out of the model's attention.",
+        )
 
     model = (body.answer_model or "").strip() or None
     with _sessions()() as session:
@@ -998,23 +1059,23 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
         session.execute(text(f"""
             UPDATE {S}.connector
                SET answer_model = :m,
-                   answer_detail = coalesce(:d, answer_detail),
+                   answer_tone = coalesce(:t, answer_tone),
                    updated_at = now()
              WHERE org_id = :o AND slug = :s
-        """), {"m": model, "d": detail, "o": org, "s": slug})
+        """), {"m": model, "t": tone, "o": org, "s": slug})
         session.commit()
-    return {"answer_model": model, "answer_detail": detail}
+    return {"answer_model": model, "answer_tone": tone}
 
 
 def _answering_for(slug: str) -> tuple[str | None, str]:
-    """The model and detail level this connector answers with."""
+    """The model and the voice this connector answers in."""
     with _sessions()() as session:
         row = session.execute(text(f"""
-            SELECT answer_model, answer_detail FROM {S}.connector WHERE slug = :s
+            SELECT answer_model, answer_tone FROM {S}.connector WHERE slug = :s
         """), {"s": slug}).mappings().one_or_none()
     if row is None:
-        return None, "full"
-    return row["answer_model"], row["answer_detail"] or "full"
+        return None, ""
+    return row["answer_model"], row["answer_tone"] or ""
 
 
 class ConnectorCreate(BaseModel):
@@ -1278,8 +1339,80 @@ def chat_starters(slug: str) -> dict:
             """), {"c": cid}).mappings().all()
         }
 
-    starters = choose(scope_population(platform.index, connector), weights=weights)
-    return {"starters": [s.model_dump(mode="json") for s in starters]}
+    population = scope_population(platform.index, connector)
+    picked = choose(population, weights=weights)
+
+    # The chips a reader sees are questions, written from the pages this
+    # connector actually holds. The picked documents decide *what* they are
+    # about — one per section, biggest first — and the model decides how they
+    # are worded, because a page title offered as a question reads as a page
+    # title: "Personal Loan FAQs | Wells Fargo" is not something anybody types.
+    #
+    # Cached per corpus version: this is the same six sentences for every
+    # visitor until the corpus changes, and paying for them on each page load
+    # is paying for the same six sentences over and over.
+    written = _cached_openers(slug, connector, picked, platform)
+    if written:
+        return {
+            "starters": [
+                {"label": q, "question": q, "section": None} for q in written
+            ]
+        }
+
+    return {"starters": [s.model_dump(mode="json") for s in picked]}
+
+
+#: Keyed by connector and the documents behind the suggestions, so a re-crawl
+#: produces new ones and nothing else does.
+_OPENERS: dict[str, tuple[str, list[str]]] = {}
+
+
+def _cached_openers(slug, connector, picked, platform) -> list[str]:
+    import hashlib
+
+    from ..services.suggesting import openers
+
+    if not picked:
+        return []
+
+    signature = hashlib.blake2b(
+        "|".join(sorted(p.question for p in picked)).encode(), digest_size=8
+    ).hexdigest()
+    cached = _OPENERS.get(slug)
+    if cached and cached[0] == signature:
+        return cached[1]
+
+    # What the pages *say*, not what they are called.
+    #
+    # Given titles alone the model wrote "How do I find Auto loans FAQs?" —
+    # which is a question about navigating a website, and nobody opening a
+    # help assistant wants to find the page. They want what is on it. So each
+    # chosen document contributes its opening passage, and the questions come
+    # back about repayment terms and routing numbers instead.
+    with _sessions()() as session:
+        cid = _connector_id(session, slug)
+        snippets = {
+            r["doc_id"]: r["text"]
+            for r in session.execute(text(f"""
+                SELECT DISTINCT ON (d.doc_id) d.doc_id AS doc_id, c.text AS text
+                  FROM {S}.document_chunk c
+                  JOIN {S}.document d ON d.id = c.document_id
+                 WHERE c.connector_id = :c AND d.doc_id = ANY(:docs)
+                 ORDER BY d.doc_id, c.ordinal
+            """), {"c": cid, "docs": [p.doc_id for p in picked]}).mappings().all()
+        }
+
+    class _Doc:
+        def __init__(self, title, body):
+            self.title, self.path = title, body
+
+    written = openers(
+        getattr(platform, "suggester", None),
+        [_Doc(p.label, (snippets.get(p.doc_id) or "")[:900]) for p in picked],
+        limit=6,
+    )
+    _OPENERS[slug] = (signature, written)
+    return written
 
 
 @router.get("/api/connectors/{slug}/roles/{role_id}/effective")
@@ -1745,6 +1878,34 @@ def _instructions_for(slug: str) -> str:
 
 from ..domain.followups import suggest as suggest_followups
 
+def _followups(platform, citations, question: str) -> list[dict]:
+    """Written by a small model, kept only if the passages bear them out.
+
+    Constructed suggestions were answerable and unreadable — "What should I
+    know about You have questions, we have answers?" is a marketing line, and
+    "How can we help?" is the *site* asking the reader, handed back as though
+    they had asked it. Neither is a question anybody would type.
+
+    So the phrasing is written and the subject is checked: everything the
+    model returns goes through `domain.suggestions.keep`, which throws away
+    anything whose words are not in the passages that just answered. If the
+    model is unavailable the constructed ones stand in — a plainer suggestion
+    beats none.
+    """
+    from ..domain.followups import suggest as constructed
+    from ..services.suggesting import follow_ups
+
+    written = follow_ups(
+        getattr(platform, "suggester", None), citations, question=question
+    )
+    if written:
+        return [{"question": q, "because": "these passages"} for q in written]
+    return [
+        {"question": f.question, "because": f.because}
+        for f in constructed(citations, question=question)
+    ]
+
+
 
 def _config_settings():
     from ..config import settings as _s
@@ -1863,7 +2024,7 @@ def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
 
 
 def _run_answer(platform, question, citations, history, instructions="", synonyms=None,
-                page=None, data=None, detail=None, model=None):
+                page=None, data=None, tone=None, model=None):
     """Drive the async answerer from this synchronous stream.
 
     The endpoint is a sync generator because the retrieval pipeline is
@@ -1884,7 +2045,7 @@ def _run_answer(platform, question, citations, history, instructions="", synonym
         try:
             async for item in platform.answering.stream(
                 question, citations, history, instructions, synonyms, page, data,
-                detail, model,
+                tone, model,
             ):
                 outbox.put(item)
         except Exception as exc:  # noqa: BLE001
@@ -2137,23 +2298,41 @@ def chat_stream(body: AskStream):
             )
             trace = evidence.trace
 
+            # Every step carries what it cost.
+            #
+            # Without it, a list of five steps reads as five comparable pieces
+            # of work, and the cheapest one draws the most suspicion: somebody
+            # watching "Compiling scope and permissions" scroll past on every
+            # question reasonably asks why it is not done once per thread. It
+            # is re-checked every question on purpose — a role edited or an
+            # access revoked mid-conversation must take effect on the next
+            # answer, not the next thread — and it costs nothing, which is a
+            # far better answer when the screen can show the number.
+            phases = trace.phase_ms or {}
+
+            def took(*keys: str) -> str:
+                total = sum(phases.get(k, 0.0) for k in keys)
+                return f"{total:.0f} ms" if total >= 1 else "under 1 ms"
+
             yield _sse({"type": "tool_end", "name": "compile", "label": stages[0][1],
-                        "status": "ok", "detail": f"plan {trace.plan_hash}"})
+                        "status": "ok", "ms": took("compile"),
+                        "detail": f"plan {trace.plan_hash}"})
             yield _sse({"type": "tool_end", "name": "candidates", "label": stages[1][1],
-                        "status": "ok",
+                        "status": "ok", "ms": took("candidates", "embed_question"),
                         "detail": ", ".join(f"{c.channel} {c.hits}" for c in trace.channels)})
-            for name, label, detail in [
+            for name, label, detail, keys in [
                 ("resolve", stages[2][1],
                  f"{len(trace.candidates)} candidates, {trace.stale_index_count} stale, "
-                 f"{trace.forbidden_count} forbidden"),
+                 f"{trace.forbidden_count} forbidden",
+                 ("resolve", "resolve_batch")),
                 ("passages", stages[3][1],
-                 f"cache {trace.cache_hit_rate:.0%}"),
+                 f"cache {trace.cache_hit_rate:.0%}", ("passages", "prime")),
                 ("rerank", stages[4][1],
-                 f"{len(evidence.citations)} passages above the floor"),
+                 f"{len(evidence.citations)} passages above the floor", ("rerank",)),
             ]:
                 yield _sse({"type": "tool_start", "name": name, "label": label})
                 yield _sse({"type": "tool_end", "name": name, "label": label,
-                            "status": "ok", "detail": detail})
+                            "status": "ok", "ms": took(*keys), "detail": detail})
 
             # ⑦ answer ------------------------------------------------------
             # The relevance gate runs first and can refuse without calling the
@@ -2168,12 +2347,12 @@ def chat_stream(body: AskStream):
                 if turn.get("question")
             ]
             outcome = None
-            answer_model, answer_detail = _answering_for(body.connector_id)
+            answer_model, answer_tone = _answering_for(body.connector_id)
             for text, result in _run_answer(
                 platform, body.question, evidence.citations, history,
                 _instructions_for(body.connector_id),
                 evidence.trace.synonyms,
-                None, None, answer_detail, answer_model,
+                None, None, answer_tone, answer_model,
             ):
                 if result is not None:
                     outcome = result
@@ -2212,12 +2391,9 @@ def chat_stream(body: AskStream):
             # to do it. Only offered when the answer stood up: proposing
             # follow-ups to "I could not find that" is noise.
             if outcome is not None and outcome.supported:
-                payload["followups"] = [
-                    {"question": f.question, "because": f.because}
-                    for f in suggest_followups(
-                        evidence.citations, question=body.question
-                    )
-                ]
+                payload["followups"] = _followups(
+                    platform, evidence.citations, body.question
+                )
             else:
                 payload["followups"] = []
 

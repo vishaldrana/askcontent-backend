@@ -183,7 +183,7 @@ class _Fake:
         self._text, self._cited, self._used_data = text, cited, used_data
 
     async def stream(self, *, question, passages, history=(), instructions="",
-                     page=None, data=None, detail=None) -> AsyncIterator[AnswerChunk]:
+                     page=None, data=None, tone=None) -> AsyncIterator[AnswerChunk]:
         yield AnswerChunk(text=self._text)
         yield AnswerChunk(done=True, supported=True, cited=self._cited,
                           used_data=self._used_data)

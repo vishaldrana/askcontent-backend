@@ -66,6 +66,10 @@ class Starter(BaseModel):
     label: str
     question: str
     section: str | None = None
+    #: The document it was chosen from. Carried so a caller that wants to
+    #: write a real question — rather than offer the title — can go and read
+    #: what the page says.
+    doc_id: str = ""
 
 
 def _section(doc: _Doc) -> str | None:
@@ -156,6 +160,7 @@ def choose(
             label=d.title.strip(),
             question=d.title.strip(),
             section=_section(d),
+            doc_id=getattr(d, "doc_id", "") or "",
         )
         for d in chosen
     )

@@ -52,6 +52,13 @@ class RetrievalConfig(BaseModel):
     #: and those are not the same text. Ignored by an index that does not
     #: advertise the capability.
     index_side_rerank: bool = True
+    #: Which local reranker this connector uses, and with which model. `None`
+    #: is the deployment's own. Held here rather than in the environment
+    #: because one process serves connectors over the enterprise index — where
+    #: the platform already ranked — and connectors over content we crawled
+    #: ourselves, where nobody else holds the fragments. See migration 0022.
+    reranker: str | None = None
+    rerank_model: str | None = None
     #: How many passages reach the reranker. Everything past it is dropped on
     #: the cheap similarity score, which is reliable about which passages are
     #: worth a careful look and unreliable about their order — so the expensive

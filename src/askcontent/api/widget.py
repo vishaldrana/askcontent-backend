@@ -389,11 +389,11 @@ async def widget_ask(
 
             answer_at = time.monotonic()
             outcome = None
-            answer_model, answer_detail = _answering_for(slug)
+            answer_model, answer_tone = _answering_for(slug)
             for chunk, result in _run_answer(
                 platform, question, evidence.citations, (),
                 _instructions_for(slug), evidence.trace.synonyms, page, data,
-                answer_detail, answer_model,
+                answer_tone, answer_model,
             ):
                 if result is not None:
                     outcome = result

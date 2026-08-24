@@ -16,7 +16,9 @@ from .adapters.index.mock_pgp import MockPgpIndex
 from .adapters.repository.mock_ecm import MockEcmRepository
 from .adapters.rerankers.lexical import LexicalReranker
 from .adapters.answerers import build_answerer
+from .adapters.suggesters import LlmSuggester, NoSuggester
 from .adapters.answerers.pool import for_model as answerer_for
+from .adapters.rerankers.pool import for_choice as reranker_for
 from .domain.catalog import AuthorityRule, FreshnessPolicy
 from .services.answering import AnsweringService
 from .domain.documents import AuthorityTier, Sensitivity
@@ -33,6 +35,28 @@ from .services.registry import (
 from .services.retrieval import RetrievalService
 
 logger = logging.getLogger(__name__)
+
+
+def build_suggester():
+    """A small model for writing follow-ups, or nothing.
+
+    Deliberately not the answering model: this call happens on every answer
+    and is worth a fraction of the cost, and nothing it produces is trusted —
+    it is filtered against the passages either way.
+    """
+    from .config import settings
+
+    if not settings.llm_api_key:
+        return NoSuggester()
+    try:
+        return LlmSuggester(
+            provider=(settings.llm_provider or "openai").lower().replace("auto", "openai"),
+            model=os.environ.get("ASKCONTENT_SUGGEST_MODEL", "gpt-5.4-mini"),
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+        )
+    except Exception:  # noqa: BLE001
+        return NoSuggester()
 
 
 def build_reranker(embedder=None):
@@ -135,7 +159,9 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     repository = PgEcmRepository(engine)
     reranker = build_reranker(embedder)
     passages = PassageService(repository, embedder, sandbox=False)
-    retrieval = RetrievalService(index, repository, embedder, reranker, passages)
+    retrieval = RetrievalService(
+        index, repository, embedder, reranker, passages, rerankers=reranker_for
+    )
 
     org_id = _ensure_org(sessions, org_slug)
     registry = PgRegistry(sessions, org_id)
@@ -154,6 +180,7 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
         passages=passages, retrieval=retrieval, registry=registry,
         answering=AnsweringService(build_answerer(), pool=answerer_for),
         context_fetcher=HttpContextFetcher(),
+        suggester=build_suggester(),
     )
 
 
@@ -311,6 +338,10 @@ class Platform:
     retrieval: RetrievalService
     registry: Registry
     answering: AnsweringService
+    #: Writes follow-up questions. Held on the platform because choosing one
+    #: names an adapter, and everything it writes is checked by the service
+    #: layer against the passages before a reader sees it.
+    suggester: object = None
     #: Reads a connector's configured live source. Held on the platform rather
     #: than imported where it is used, so the service layer stays free of
     #: adapters and a deployment can substitute one.
@@ -323,7 +354,9 @@ def build(*, simulate_latency: bool = True, failure_rate: float = 0.0) -> Platfo
     embedder = HashingEmbedder()
     reranker = build_reranker(embedder)
     passages = PassageService(repository, embedder, sandbox=False)
-    retrieval = RetrievalService(index, repository, embedder, reranker, passages)
+    retrieval = RetrievalService(
+        index, repository, embedder, reranker, passages, rerankers=reranker_for
+    )
     registry = Registry()
 
     platform = Platform(

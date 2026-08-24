@@ -91,7 +91,7 @@ class LangChainAnswerer(Answerer):
         instructions: str = "",
         page=None,
         data=None,
-        detail=None,
+        tone=None,
     ) -> AsyncIterator[AnswerChunk]:
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -106,7 +106,7 @@ class LangChainAnswerer(Answerer):
             return
 
         messages = [
-            SystemMessage(content=system_prompt(instructions, detail)),
+            SystemMessage(content=system_prompt(instructions, tone)),
             HumanMessage(content=render(question, passages, history, page, data)),
         ]
 
