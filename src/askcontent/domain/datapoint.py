@@ -29,7 +29,7 @@ class Datapoint(BaseModel):
     #: Position in the answer's markers: `[d1]` is `number == 1`. Stable for
     #: the life of one answer, exactly like a passage number.
     number: int
-    #: The source's display name — "Survey analytics", not a URL. What the
+    #: The source's display name — "Account analytics", not a URL. What the
     #: reader is told the number came from.
     source: str
     #: The identifier it was fetched with. The page's, never the model's.
@@ -103,7 +103,7 @@ class FieldMap(BaseModel):
     means. With it, an answer can only speak about values somebody named.
     """
 
-    #: Dotted path into the response: "summary.nps". A list index is a number:
+    #: Dotted path into the response: "summary.balance". A list index is a number:
     #: "segments.0.name".
     path: str
     label: str
@@ -114,9 +114,9 @@ def extract(payload: object, fields: tuple[FieldMap, ...], *, source: str, key: 
     """Pull the mapped values out of a response.
 
     A path that is not present is skipped rather than rendered as "None". The
-    host's API omitting a field is normal — a survey with no responses has no
-    average — and an answer that says "NPS: None" is worse than one that does
-    not mention NPS.
+    host's API omitting a field is normal — an account with no activity has no
+    average — and an answer that says "Current balance: None" is worse than one
+    that does not mention the balance.
     """
     points: list[Datapoint] = []
     for field in fields:

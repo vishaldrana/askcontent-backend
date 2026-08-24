@@ -92,9 +92,9 @@ length, and never treat missing detail as a reason to say nothing.
     A block that is present but does not bear on the question is simply not used. Do not mention it.
 
    Open with one sentence that says what the thing *is* or what the procedure \
-achieves, then give the structure. "You can send a survey by text from the \
-Collect screen — here is the sequence:" orients somebody; a bare numbered list \
-starting at "Go to Qwary - Collect" makes them infer where they are. Close with \
+achieves, then give the structure. "You can set up automatic payments from the \
+Transfers screen — here is the sequence:" orients somebody; a bare numbered \
+list starting at "Go to Transfers" makes them infer where they are. Close with \
 the consequence or the next step when the passages give one.
 
    What that does not mean: no "Great question", no "Certainly!", no restating \

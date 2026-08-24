@@ -19,6 +19,13 @@ tell me?" has no subject. "What can I tell my customers about NPS?" has two,
 and is a content question that merely contains the word "tell". Requiring the
 absence of a subject is what keeps this from hijacking real questions, and it
 is why the check is a conjunction rather than a keyword list.
+
+**The verb list is the part that keeps being too short.** "What can you answer
+then?" is what somebody types straight after a refusal — the one moment they
+most need an orientation and the one moment a second refusal is most
+damaging — and it went to retrieval because the phrasing list knew *tell*,
+*ask*, *do* and *help* but not *answer*. Each addition here is a real question
+somebody asked and did not get an answer to.
 """
 
 from __future__ import annotations
@@ -43,7 +50,9 @@ class QuestionKind(StrEnum):
 #: and contents*, never about a subject.
 _SCOPE = re.compile(
     r"\b("
-    r"what (?:all )?can (?:you|i) (?:tell|ask|do|help)"
+    r"what (?:all |else )?can (?:you|i) (?:tell|ask|answer|do|help|cover|find)"
+    r"|what else (?:do|can) you"
+    r"|what (?:questions|else) can i ask"
     r"|what (?:do|can) you know"
     r"|what (?:are you|is this) (?:for|about)"
     r"|what(?:'s| is) (?:in )?(?:here|this)"

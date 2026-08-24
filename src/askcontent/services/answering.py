@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 
+from ..domain.decline import declines
 from ..domain.figures import strip_unsupported
 from ..domain.groundedness import assess
 from ..ports.answerer import AnswerChunk, Passage
@@ -44,6 +45,10 @@ class AnswerOutcome:
     #: The answer as the reader should see it, when that differs from what was
     #: streamed. `None` when nothing was taken out.
     revised: str | None = None
+    #: The answer said the corpus does not hold this. Not supported -- there
+    #: is nothing to support -- but not a violation either, and reported as
+    #: neither: see `domain/decline.py`.
+    declined: bool = False
     #: Set when the answerer itself failed — a timeout, a rate limit, an
     #: outage.
     #:
@@ -206,6 +211,12 @@ class AnsweringService:
                     and not page_claimed
                     and not data_claimed
                 )
+                # An answer that says the corpus is silent has nothing to
+                # cite, and flagging it for citing nothing tells the reader
+                # the system doubts its own decline. Only ever reachable on an
+                # answer that cited nothing at all, so a grounded answer with
+                # one hedging sentence cannot land here.
+                declined = uncited and declines(said)
                 outcome = AnswerOutcome(
                     supported=(
                         chunk.supported and not invented and not uncited
@@ -219,6 +230,7 @@ class AnsweringService:
                     derived=derived,
                     removed=stripped.removed,
                     revised=stripped.kept if stripped.changed else None,
+                    declined=declined,
                     reason=(
                         "the answer attributed something to a page that was "
                         "never supplied"
@@ -231,7 +243,7 @@ class AnsweringService:
                         f"once they were removed: {', '.join(derived)}"
                         if gutted else
                         "the answer cited nothing, so none of it can be checked"
-                        if uncited else None
+                        if uncited and not declined else None
                     ),
                 )
 

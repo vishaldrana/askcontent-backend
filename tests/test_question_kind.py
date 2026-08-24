@@ -56,3 +56,26 @@ def test_one_subject_still_counts_as_orientation():
 
 def test_an_empty_question_is_not_special_cased():
     assert classify("") is QuestionKind.CONTENT
+
+
+def test_the_question_asked_right_after_a_refusal_is_a_scope_question():
+    """"What can you answer then?"
+
+    The worst possible moment to refuse twice. Somebody has just been told the
+    corpus does not cover what they asked, and they are asking what it *does*
+    cover — which is the one question the system can always answer.
+    """
+    assert classify("what can you answer then?") is QuestionKind.SCOPE
+    assert classify("what else can you answer") is QuestionKind.SCOPE
+    assert classify("what else do you know") is QuestionKind.SCOPE
+    assert classify("what questions can i ask") is QuestionKind.SCOPE
+
+
+def test_widening_the_verbs_did_not_swallow_real_questions():
+    # Each of these contains a scope verb and a subject of its own.
+    assert classify("what can I tell my customers about NPS?") is QuestionKind.CONTENT
+    assert (
+        classify("what can you find about overdraft fees on a checking account")
+        is QuestionKind.CONTENT
+    )
+    assert classify("Can I refinance auto loans?") is QuestionKind.CONTENT

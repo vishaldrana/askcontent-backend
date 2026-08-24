@@ -2034,13 +2034,27 @@ class AskStream(BaseModel):
     #: a research run on "how do I reset my password" costs minutes to produce
     #: what the ordinary path produces in two seconds.
     research: bool = False
+    #: What *this* run should cost, chosen in the composer beside the question.
+    #: The connector's setting is the default a thread starts from, not a
+    #: ceiling: how deep to go is a judgement about the question in front of
+    #: the reader, and they are the one waiting for it.
+    research_config: dict | None = None
 
 
-def _research_config_for(slug: str) -> dict | None:
+def _research_config_for(slug: str, override: dict | None = None) -> dict | None:
+    """The connector's research config, with this turn's choices on top."""
     with _sessions()() as session:
-        return session.execute(text(f"""
+        stored = session.execute(text(f"""
             SELECT research FROM {S}.connector WHERE slug = :s
         """), {"s": slug}).scalar_one_or_none()
+    if not override:
+        return stored
+    # `enabled` is not overridable from the composer. It is the deployment's
+    # decision that this corpus may be researched at all, and a request that
+    # could set it would make the setting decorative.
+    merged = dict(stored or {})
+    merged.update({k: v for k, v in override.items() if k != "enabled"})
+    return merged
 
 
 def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
@@ -2327,7 +2341,7 @@ def _research_turn(platform, connector, body, principal, started):
     from ..services.research import run as run_research
     from ..services.retrieval import Evidence
 
-    config = resolve_config(_research_config_for(body.connector_id))
+    config = resolve_config(_research_config_for(body.connector_id, body.research_config))
     if not config.get("enabled"):
         yield _sse({"type": "error",
                     "message": "Deep research is not enabled for this knowledgebase."})
@@ -2347,7 +2361,7 @@ def _research_turn(platform, connector, body, principal, started):
     for event, payload in run_research(
         platform, connector, body.question,
         principal=principal,
-        config=_research_config_for(body.connector_id),
+        config=_research_config_for(body.connector_id, body.research_config),
         role_rules=_rules_for_role(body.connector_id, body.role),
         glossary=_glossary_for(body.connector_id),
         instructions=_instructions_for(body.connector_id),
@@ -2419,6 +2433,58 @@ def _research_turn(platform, connector, body, principal, started):
     yield _sse({"type": "timing",
                 "elapsed_ms": (dt.datetime.now() - started).total_seconds() * 1000})
     yield _sse({"type": "done"})
+
+
+@router.get("/api/chat/research/presets")
+def research_presets(connector_id: str | None = None) -> dict:
+    """What the composer needs to offer a depth, and what each one costs.
+
+    The cost is spelled out in the units a reader is actually spending —
+    how many parts, and how long they will be waiting — because "thorough"
+    on its own is a word, not a decision. `default` is the connector's
+    setting, which is where a thread starts rather than where it must stay.
+    """
+    from ..domain.research import DEPTH_PRESETS, resolve_config
+
+    stored = resolve_config(
+        _research_config_for(connector_id) if connector_id else None
+    )
+    return {
+        "enabled": bool(stored.get("enabled")),
+        "default": stored.get("depth") or "standard",
+        "presets": DEPTH_PRESETS,
+        "descriptions": {
+            "quick": "3 parts · up to 90s",
+            "standard": "6 parts · up to 5 min",
+            "thorough": "10 parts · up to 10 min",
+        },
+    }
+
+
+class ResearchPreflight(BaseModel):
+    question: str
+
+
+@router.post("/api/chat/research/preflight")
+def research_preflight(body: ResearchPreflight) -> dict:
+    """Whether the ordinary path would answer this just as well.
+
+    A warning, never a refusal, and it is the composer that decides how loudly
+    to say it. Somebody who wants a research run on a simple question is
+    allowed to have one — they may know something about the corpus that a
+    prefix test does not.
+    """
+    from ..domain.research import looks_single_shot
+
+    single = looks_single_shot(body.question)
+    return {
+        "single_shot": single,
+        "warning": (
+            "One search probably answers this. Deep research will take minutes "
+            "to reach the same place."
+            if single else None
+        ),
+    }
 
 
 @router.post("/api/chat/stream")
@@ -2569,13 +2635,21 @@ def chat_stream(body: AskStream):
             yield _sse({
                 "type": "tool_end", "name": "answer",
                 "label": "Composing a grounded answer",
-                "status": "ok" if (outcome and outcome.supported) else "warn",
+                # A decline is not a flagged step. The corpus not covering
+                # something is an outcome, not a fault, and marking it warn
+                # put "1 flagged" on a turn whose only event was the
+                # assistant correctly saying it did not know.
+                "status": "ok" if (
+                    outcome and (outcome.supported or outcome.declined)
+                ) else "warn",
                 # No provider or model name: the trace is read by whoever is
                 # asking the question, and which vendor answered is a
                 # deployment detail they cannot act on.
                 "detail": (
                     f"cited {len(outcome.cited)} of {len(evidence.citations)} passages"
                     if outcome and outcome.supported
+                    else "nothing retrieved covers that"
+                    if outcome and outcome.declined
                     else (outcome.reason if outcome and outcome.reason
                           else "not answerable from this corpus")
                 ),
