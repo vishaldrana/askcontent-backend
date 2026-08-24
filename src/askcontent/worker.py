@@ -61,7 +61,7 @@ def enqueue(sessions, org_id, kind: str, *, connector_id=None, collection_id=Non
     """
     with sessions() as session:
         existing = session.execute(text(f"""
-            SELECT id FROM {S}.job
+            SELECT id FROM {S}.askcontent_job
             WHERE org_id = :o AND kind = :k AND status IN ('queued', 'retry')
               -- CAST(...) rather than `::text`: SQLAlchemy's text() reads the
               -- second colon of `:c::text` as the start of another bind
@@ -73,7 +73,7 @@ def enqueue(sessions, org_id, kind: str, *, connector_id=None, collection_id=Non
             return str(existing)
 
         job_id = session.execute(text(f"""
-            INSERT INTO {S}.job (org_id, connector_id, collection_id, kind, status,
+            INSERT INTO {S}.askcontent_job (org_id, connector_id, collection_id, kind, status,
                                  payload, run_after)
             VALUES (:o, :c, :col, :k, 'queued', :p, coalesce(:after, now()))
             RETURNING id
@@ -91,11 +91,11 @@ def _claim(sessions):
     """
     with sessions() as session:
         row = session.execute(text(f"""
-            UPDATE {S}.job SET status = 'running', locked_at = now(),
+            UPDATE {S}.askcontent_job SET status = 'running', locked_at = now(),
                                locked_by = :who, attempts = attempts + 1,
                                started_at = coalesce(started_at, now())
             WHERE id = (
-                SELECT id FROM {S}.job
+                SELECT id FROM {S}.askcontent_job
                 WHERE status IN ('queued', 'retry') AND run_after <= now()
                 ORDER BY run_after, created_at
                 FOR UPDATE SKIP LOCKED LIMIT 1
@@ -111,7 +111,7 @@ def _finish(sessions, job_id, *, progress: dict, error: str | None,
     with sessions() as session:
         if error is None:
             session.execute(text(f"""
-                UPDATE {S}.job SET status = 'done', progress = :p, error = NULL,
+                UPDATE {S}.askcontent_job SET status = 'done', progress = :p, error = NULL,
                                    finished_at = now(), locked_at = NULL, locked_by = NULL
                 WHERE id = :id
             """), {"id": job_id, "p": json.dumps(progress)})
@@ -120,14 +120,14 @@ def _finish(sessions, job_id, *, progress: dict, error: str | None,
             # and hammering it turns one outage into two.
             delay = min(300, 5 * (2 ** (attempts - 1)))
             session.execute(text(f"""
-                UPDATE {S}.job SET status = 'retry', error = :e,
+                UPDATE {S}.askcontent_job SET status = 'retry', error = :e,
                                    run_after = now() + make_interval(secs => :d),
                                    locked_at = NULL, locked_by = NULL
                 WHERE id = :id
             """), {"id": job_id, "e": error[:2000], "d": delay})
         else:
             session.execute(text(f"""
-                UPDATE {S}.job SET status = 'failed', error = :e, finished_at = now(),
+                UPDATE {S}.askcontent_job SET status = 'failed', error = :e, finished_at = now(),
                                    locked_at = NULL, locked_by = NULL
                 WHERE id = :id
             """), {"id": job_id, "e": error[:2000]})
@@ -143,7 +143,7 @@ def _write_progress(sessions, job_id, snapshot: dict) -> None:
     """
     with sessions() as session:
         session.execute(text(
-            f"UPDATE {S}.job SET progress = :p WHERE id = :id"
+            f"UPDATE {S}.askcontent_job SET progress = :p WHERE id = :id"
         ), {"id": job_id, "p": json.dumps(snapshot, default=str)})
         session.commit()
 

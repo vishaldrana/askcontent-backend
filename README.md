@@ -92,16 +92,16 @@ differs from a schema, and the model's docstring says how.
 
 | Group | Tables |
 |---|---|
-| Identity and tenancy | `org`, `app_user`, `membership`, `workspace`, `auth_session` |
-| Sources | `knowledgebase`, `connector`, `field_rule` |
-| The catalog | `document`, `document_chunk`, `document_pin`, `authority_rule` |
-| Vectors | `embedding` |
-| Plans and terms | `retrieval_plan`, `glossary_term` |
-| Conversations | `thread`, `message` |
-| Audit | `retrieval_run`, `scope_change` |
-| RBAC | `rbac_role`, `rbac_role_member`, `rbac_label_rule`, `rbac_policy_version` |
-| Operations | `job`, `quarantine_item`, `embed`, `embed_session` |
-| Control plane *(separate database)* | `tenant`, `tenant_migration`, `global_user`, `user_tenant` |
+| Identity and tenancy | `askcontent_org`, `askcontent_app_user`, `askcontent_membership`, `askcontent_workspace`, `askcontent_auth_session` |
+| Sources | `askcontent_knowledgebase`, `askcontent_connector`, `askcontent_field_rule` |
+| The catalog | `askcontent_document`, `askcontent_document_chunk`, `askcontent_document_pin`, `askcontent_authority_rule` |
+| Vectors | `askcontent_embedding` |
+| Plans and terms | `askcontent_retrieval_plan`, `askcontent_glossary_term` |
+| Conversations | `askcontent_thread`, `askcontent_message` |
+| Audit | `askcontent_retrieval_run`, `askcontent_scope_change` |
+| RBAC | `askcontent_rbac_role`, `askcontent_rbac_role_member`, `askcontent_rbac_label_rule`, `askcontent_rbac_policy_version` |
+| Operations | `askcontent_job`, `askcontent_quarantine_item`, `askcontent_embed`, `askcontent_embed_session` |
+| Control plane *(separate database)* | `askcontent_tenant`, `askcontent_tenant_migration`, `askcontent_global_user`, `askcontent_user_tenant` |
 
 ### Four things here are load-bearing
 

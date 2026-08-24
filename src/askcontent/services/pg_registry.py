@@ -39,7 +39,7 @@ def _scope_hash(scope: KnowledgeScope) -> str:
 
 
 class PgRegistry:
-    """Reads and writes `askcontent.connector` and friends."""
+    """Reads and writes `askcontent.askcontent_connector` and friends."""
 
     def __init__(self, session_factory, org_id: uuid.UUID) -> None:
         self._sessions = session_factory

@@ -1,14 +1,14 @@
 -- ===== CONTROL PLANE =====
-CREATE TABLE askcontent_control.global_user (
+CREATE TABLE askcontent_control.askcontent_global_user (
 	email VARCHAR(320) NOT NULL, 
 	id UUID NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
-	CONSTRAINT pk_global_user PRIMARY KEY (id), 
-	CONSTRAINT uq_global_user_email UNIQUE (email)
+	CONSTRAINT pk_askcontent_global_user PRIMARY KEY (id), 
+	CONSTRAINT uq_askcontent_global_user_email UNIQUE (email)
 );
 
-CREATE TABLE askcontent_control.tenant (
+CREATE TABLE askcontent_control.askcontent_tenant (
 	slug VARCHAR(64) NOT NULL, 
 	name VARCHAR(200) NOT NULL, 
 	status VARCHAR(16) NOT NULL, 
@@ -19,11 +19,11 @@ CREATE TABLE askcontent_control.tenant (
 	id UUID NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
-	CONSTRAINT pk_tenant PRIMARY KEY (id), 
-	CONSTRAINT uq_tenant_slug UNIQUE (slug)
+	CONSTRAINT pk_askcontent_tenant PRIMARY KEY (id), 
+	CONSTRAINT uq_askcontent_tenant_slug UNIQUE (slug)
 );
 
-CREATE TABLE askcontent_control.tenant_migration (
+CREATE TABLE askcontent_control.askcontent_tenant_migration (
 	tenant_id UUID NOT NULL, 
 	revision VARCHAR(64) NOT NULL, 
 	status VARCHAR(16) NOT NULL, 
@@ -31,19 +31,19 @@ CREATE TABLE askcontent_control.tenant_migration (
 	id UUID NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
-	CONSTRAINT pk_tenant_migration PRIMARY KEY (id), 
-	CONSTRAINT fk_tenant_migration_tenant_id FOREIGN KEY(tenant_id) REFERENCES askcontent_control.tenant (id) ON DELETE CASCADE
+	CONSTRAINT pk_askcontent_tenant_migration PRIMARY KEY (id), 
+	CONSTRAINT fk_askcontent_tenant_migration_tenant_id FOREIGN KEY(tenant_id) REFERENCES askcontent_control.askcontent_tenant (id) ON DELETE CASCADE
 );
 
-CREATE TABLE askcontent_control.user_tenant (
+CREATE TABLE askcontent_control.askcontent_user_tenant (
 	global_user_id UUID NOT NULL, 
 	tenant_id UUID NOT NULL, 
 	id UUID NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
-	CONSTRAINT pk_user_tenant PRIMARY KEY (id), 
-	CONSTRAINT uq_user_tenant_global_user_id UNIQUE (global_user_id, tenant_id), 
-	CONSTRAINT fk_user_tenant_global_user_id FOREIGN KEY(global_user_id) REFERENCES askcontent_control.global_user (id) ON DELETE CASCADE, 
-	CONSTRAINT fk_user_tenant_tenant_id FOREIGN KEY(tenant_id) REFERENCES askcontent_control.tenant (id) ON DELETE CASCADE
+	CONSTRAINT pk_askcontent_user_tenant PRIMARY KEY (id), 
+	CONSTRAINT uq_askcontent_user_tenant_global_user_id UNIQUE (global_user_id, tenant_id), 
+	CONSTRAINT fk_askcontent_user_tenant_global_user_id FOREIGN KEY(global_user_id) REFERENCES askcontent_control.askcontent_global_user (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_askcontent_user_tenant_tenant_id FOREIGN KEY(tenant_id) REFERENCES askcontent_control.askcontent_tenant (id) ON DELETE CASCADE
 );
 

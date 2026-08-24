@@ -24,13 +24,13 @@ class GlossaryService:
         """
         with self.sessions() as session:
             connector_id = session.execute(text(
-                f"SELECT id FROM {S}.connector WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_connector WHERE org_id = :o AND slug = :s"
             ), {"o": self.org_id, "s": connector_slug}).scalar_one()
 
             rows = session.execute(text(f"""
                 SELECT d.doc_id, string_agg(c.text, ' ' ORDER BY c.ordinal) AS body
-                FROM {S}.document_chunk c
-                JOIN {S}.document d ON d.id = c.document_id
+                FROM {S}.askcontent_document_chunk c
+                JOIN {S}.askcontent_document d ON d.id = c.document_id
                 -- Prose only. A curl example is not a glossary of HTTP verbs,
                 -- and a term list offering `POST` teaches the reviewer to skim.
                 WHERE c.connector_id = :c AND NOT c.is_code
@@ -45,7 +45,7 @@ class GlossaryService:
             existing = {
                 r.term.upper()
                 for r in session.execute(text(
-                    f"SELECT term FROM {S}.glossary_term WHERE connector_id = :c"
+                    f"SELECT term FROM {S}.askcontent_glossary_term WHERE connector_id = :c"
                 ), {"c": connector_id}).all()
             }
 
@@ -69,7 +69,7 @@ class GlossaryService:
                     # every future run. That is the part that must never be
                     # undone; the counts are just observations.
                     session.execute(text(f"""
-                        UPDATE {S}.glossary_term SET
+                        UPDATE {S}.askcontent_glossary_term SET
                             method = :method, confidence = :confidence,
                             occurrences = :occurrences, documents = :documents,
                             evidence = :evidence, updated_at = now()
@@ -84,7 +84,7 @@ class GlossaryService:
                     refreshed += 1
                     continue
                 session.execute(text(f"""
-                    INSERT INTO {S}.glossary_term (
+                    INSERT INTO {S}.askcontent_glossary_term (
                         org_id, connector_id, term, definition, aliases, source,
                         status, method, confidence, occurrences, documents, evidence
                     ) VALUES (
@@ -111,7 +111,7 @@ class GlossaryService:
             # A stale count and an inferred zero are both fact-shaped lies, and
             # the fact is one query away.
             measured = session.execute(text(f"""
-                UPDATE {S}.glossary_term g SET
+                UPDATE {S}.askcontent_glossary_term g SET
                     documents = m.documents,
                     occurrences = m.occurrences,
                     updated_at = now()
@@ -123,14 +123,14 @@ class GlossaryService:
                                    regexp_replace(lower(c.text), lower(t.term), '', 'g')
                                )) / greatest(length(t.term), 1)
                            ), 0) AS occurrences
-                    FROM {S}.glossary_term t
-                    LEFT JOIN {S}.document_chunk c
+                    FROM {S}.askcontent_glossary_term t
+                    LEFT JOIN {S}.askcontent_document_chunk c
                            ON c.connector_id = t.connector_id
                           AND NOT c.is_code
                           -- Whole word. Without the boundaries "API" matches
                           -- "rapid" and every count is fiction.
                           AND c.text ~* ('\y' || t.term || '\y')
-                    LEFT JOIN {S}.document d ON d.id = c.document_id
+                    LEFT JOIN {S}.askcontent_document d ON d.id = c.document_id
                     WHERE t.connector_id = :c
                     GROUP BY t.id
                 ) m

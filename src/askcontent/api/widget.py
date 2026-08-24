@@ -113,8 +113,8 @@ def _embed_for(key: str) -> dict:
         row = session.execute(text(f"""
             SELECT e.id, e.name, e.allowed_origins, e.is_active,
                    c.slug AS connector, c.state
-            FROM {S}.embed e
-            JOIN {S}.connector c ON c.id = e.connector_id
+            FROM {S}.askcontent_embed e
+            JOIN {S}.askcontent_connector c ON c.id = e.connector_id
             WHERE e.publishable_key = :k
         """), {"k": key}).mappings().one_or_none()
 
@@ -157,7 +157,7 @@ def _context_source_for(slug: str) -> object:
 
     with _sessions()() as session:
         return session.execute(text(f"""
-            SELECT context_source FROM {S}.connector WHERE slug = :s
+            SELECT context_source FROM {S}.askcontent_connector WHERE slug = :s
         """), {"s": slug}).scalar_one_or_none()
 
 
@@ -224,8 +224,8 @@ def widget_starters(
             r["doc_id"]: r["chunks"]
             for r in session.execute(text(f"""
                 SELECT d.doc_id AS doc_id, count(*) AS chunks
-                  FROM {S}.document_chunk c
-                  JOIN {S}.document d ON d.id = c.document_id
+                  FROM {S}.askcontent_document_chunk c
+                  JOIN {S}.askcontent_document d ON d.id = c.document_id
                  WHERE c.connector_id = :c
                  GROUP BY d.doc_id
             """), {"c": cid}).mappings().all()
@@ -516,7 +516,7 @@ def _record_use(embed_id) -> None:
     try:
         with _sessions()() as session:
             session.execute(text(f"""
-                UPDATE {S}.embed
+                UPDATE {S}.askcontent_embed
                    SET session_count = session_count + 1, last_used_at = now()
                  WHERE id = :id
             """), {"id": embed_id})

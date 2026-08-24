@@ -70,7 +70,7 @@ class CrawlPlanner:
 
         with self.sessions() as session:
             collection = session.execute(text(
-                f"SELECT id FROM {S}.collection WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_collection WHERE org_id = :o AND slug = :s"
             ), {"o": self.org_id, "s": slug}).mappings().one()
 
             # The crawl root is a *source*, recorded like any other. Without
@@ -78,19 +78,19 @@ class CrawlPlanner:
             # asked for — and "why is this page in here" becomes unanswerable
             # the moment the person who typed the root has moved on.
             rule_id = session.execute(text(f"""
-                SELECT id FROM {S}.collection_rule
+                SELECT id FROM {S}.askcontent_collection_rule
                 WHERE collection_id = :c AND kind = 'crawl'
                   AND CAST(config ->> 'root' AS text) = :root
             """), {"c": collection["id"], "root": root}).scalar_one_or_none()
 
             if rule_id is None:
                 rule_id = session.execute(text(f"""
-                    INSERT INTO {S}.collection_rule
+                    INSERT INTO {S}.askcontent_collection_rule
                         (org_id, collection_id, ordinal, kind, effect, config,
                          enumerable, last_run_at, last_candidate_count, capped)
                     VALUES (:o, :c,
                             (SELECT coalesce(max(ordinal), -1) + 1
-                               FROM {S}.collection_rule WHERE collection_id = :c),
+                               FROM {S}.askcontent_collection_rule WHERE collection_id = :c),
                             'crawl', 'include', CAST(:config AS jsonb),
                             true, now(), :found, :capped)
                     RETURNING id
@@ -101,7 +101,7 @@ class CrawlPlanner:
                 }).scalar_one()
             else:
                 session.execute(text(f"""
-                    UPDATE {S}.collection_rule
+                    UPDATE {S}.askcontent_collection_rule
                        SET last_run_at = now(), last_candidate_count = :found,
                            capped = :capped, config = CAST(:config AS jsonb),
                            updated_at = now()
@@ -116,7 +116,7 @@ class CrawlPlanner:
                 # the plan; everything after it is progress against the plan.
                 modified = _parse_iso(discovery.lastmod.get(url.rstrip("/")))
                 session.execute(text(f"""
-                    INSERT INTO {S}.collection_member
+                    INSERT INTO {S}.askcontent_collection_member
                         (org_id, collection_id, doc_id, url, title, state, resolved_via,
                          source_updated_at, updated_source, contributed_by)
                     VALUES (:o, :c, :doc, :url, :title, 'planned', 'crawl',
@@ -125,15 +125,15 @@ class CrawlPlanner:
                        SET url = EXCLUDED.url,
                            contributed_by = (
                                SELECT array_agg(DISTINCT x)
-                               FROM unnest({S}.collection_member.contributed_by
+                               FROM unnest({S}.askcontent_collection_member.contributed_by
                                            || EXCLUDED.contributed_by) AS x
                            ),
                            source_updated_at = coalesce(EXCLUDED.source_updated_at,
-                                                        {S}.collection_member.source_updated_at),
+                                                        {S}.askcontent_collection_member.source_updated_at),
                            updated_source = CASE WHEN EXCLUDED.source_updated_at IS NOT NULL
                                                  THEN 'metadata'
-                                                 ELSE {S}.collection_member.updated_source END,
-                           state = CASE WHEN {S}.collection_member.state = 'member'
+                                                 ELSE {S}.askcontent_collection_member.updated_source END,
+                           state = CASE WHEN {S}.askcontent_collection_member.state = 'member'
                                         THEN 'member' ELSE 'planned' END
                 """), {
                     "o": self.org_id, "c": collection["id"], "doc": url,
@@ -165,7 +165,7 @@ class CrawlPlanner:
 
         with self.sessions() as session:
             collection = session.execute(text(
-                f"SELECT id FROM {S}.collection WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_collection WHERE org_id = :o AND slug = :s"
             ), {"o": self.org_id, "s": slug}).mappings().one()
             collection_id = collection["id"]
             # A crawled site publishes into a knowledgebase of its own, named
@@ -176,13 +176,13 @@ class CrawlPlanner:
             space = space or slug.upper().replace("-", "_")[:32]
 
             total = session.execute(text(f"""
-                SELECT count(*) FROM {S}.collection_member
+                SELECT count(*) FROM {S}.askcontent_collection_member
                 WHERE collection_id = :c AND resolved_via = 'crawl'
             """), {"c": collection_id}).scalar_one()
 
             pending = session.execute(text(f"""
                 SELECT doc_id, url, content_hash, structure_hash, source_updated_at
-                FROM {S}.collection_member
+                FROM {S}.askcontent_collection_member
                 WHERE collection_id = :c AND resolved_via = 'crawl'
                   AND state IN ('planned', 'failed')
                 ORDER BY length(doc_id), doc_id
@@ -290,7 +290,7 @@ class CrawlPlanner:
 
         with self.sessions() as session:
             session.execute(text(f"""
-                UPDATE {S}.collection_member SET
+                UPDATE {S}.askcontent_collection_member SET
                     state = 'member', title = :title, description = :description,
                     path = :path, content_hash = :chash, structure_hash = :shash,
                     source_created_at = :created, source_updated_at = :updated,
@@ -340,7 +340,7 @@ class CrawlPlanner:
         """
         with self.sessions() as session:
             titles = session.execute(text(f"""
-                SELECT doc_id, title FROM {S}.collection_member
+                SELECT doc_id, title FROM {S}.askcontent_collection_member
                 WHERE collection_id = :c AND title IS NOT NULL
             """), {"c": collection_id}).mappings().all()
 
@@ -348,7 +348,7 @@ class CrawlPlanner:
             if not suffix:
                 return
             session.execute(text(f"""
-                UPDATE {S}.collection_member
+                UPDATE {S}.askcontent_collection_member
                 SET title = left(title, length(title) - :n)
                 WHERE collection_id = :c AND title LIKE :pattern
             """), {"c": collection_id, "n": len(suffix), "pattern": f"%{suffix}"})
@@ -363,7 +363,7 @@ class CrawlPlanner:
     def _touch(self, collection_id, doc_id: str, state: str, error: str | None) -> None:
         with self.sessions() as session:
             session.execute(text(f"""
-                UPDATE {S}.collection_member
+                UPDATE {S}.askcontent_collection_member
                 SET state = :state, last_checked_at = now(),
                     date_evidence = coalesce(:error, date_evidence)
                 WHERE collection_id = :c AND doc_id = :d

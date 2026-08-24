@@ -105,7 +105,7 @@ def reembed(
     with sessions() as session:
         connectors = session.execute(
             text(
-                f"SELECT id, slug FROM {S}.connector"
+                f"SELECT id, slug FROM {S}.askcontent_connector"
                 + (" WHERE slug = :slug" if connector_id else "")
                 + " ORDER BY slug"
             ),
@@ -133,10 +133,10 @@ def reembed(
             # comparing a cosine across two unrelated spaces.
             report.pruned_orphan += session.execute(
                 text(f"""
-                    DELETE FROM {S}.embedding e
+                    DELETE FROM {S}.askcontent_embedding e
                      WHERE e.connector_id = :c AND e.kind = 'chunk'
                        AND NOT EXISTS (
-                             SELECT 1 FROM {S}.document_chunk c
+                             SELECT 1 FROM {S}.askcontent_document_chunk c
                               WHERE c.connector_id = e.connector_id
                                 AND c.chunk_id = e.ref_id)
                 """),
@@ -144,7 +144,7 @@ def reembed(
             ).rowcount
             report.pruned_model += session.execute(
                 text(f"""
-                    DELETE FROM {S}.embedding
+                    DELETE FROM {S}.askcontent_embedding
                      WHERE connector_id = :c AND kind = 'chunk'
                        AND model_id <> :model
                 """),
@@ -159,9 +159,9 @@ def reembed(
                 text(f"""
                     SELECT c.chunk_id, c.ordinal, c.text, c.heading_path,
                            c.overlap, d.doc_id AS doc_id
-                      FROM {S}.document_chunk c
-                      JOIN {S}.document d ON d.id = c.document_id
-                      LEFT JOIN {S}.embedding e
+                      FROM {S}.askcontent_document_chunk c
+                      JOIN {S}.askcontent_document d ON d.id = c.document_id
+                      LEFT JOIN {S}.askcontent_embedding e
                              ON e.connector_id = c.connector_id
                             AND e.kind = 'chunk'
                             AND e.ref_id = c.chunk_id
@@ -196,7 +196,7 @@ def reembed(
                 for row, vector, embed_text in zip(batch, vectors, texts):
                     session.execute(
                         text(f"""
-                            INSERT INTO {S}.embedding (
+                            INSERT INTO {S}.askcontent_embedding (
                                 org_id, connector_id, kind, ref_id, parent_ref,
                                 content_hash, model_id, dimension, vector
                             ) VALUES (

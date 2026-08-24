@@ -172,8 +172,8 @@ class EvaluationService:
         with self.sessions() as session:
             rows = session.execute(text(f"""
                 SELECT CAST(c.id AS text) AS id, c.question, c.expectations, c.role
-                FROM {S}.eval_case c
-                JOIN {S}.connector n ON n.id = c.connector_id
+                FROM {S}.askcontent_eval_case c
+                JOIN {S}.askcontent_connector n ON n.id = c.connector_id
                 WHERE n.slug = :s AND c.org_id = :o AND c.enabled
                   AND (CAST(:ids AS text) IS NULL
                        OR CAST(c.id AS text) = ANY(string_to_array(CAST(:ids AS text), ',')))
@@ -204,9 +204,9 @@ class EvaluationService:
         }
         with self.sessions() as session:
             run_id = session.execute(text(f"""
-                INSERT INTO {S}.eval_run (org_id, connector_id, context)
+                INSERT INTO {S}.askcontent_eval_run (org_id, connector_id, context)
                 SELECT :o, n.id, CAST(:ctx AS jsonb)
-                FROM {S}.connector n WHERE n.slug = :s AND n.org_id = :o
+                FROM {S}.askcontent_connector n WHERE n.slug = :s AND n.org_id = :o
                 RETURNING CAST(id AS text)
             """), {"o": self.org_id, "s": slug, "ctx": json.dumps(context)}).scalar_one()
             session.commit()
@@ -218,7 +218,7 @@ class EvaluationService:
         with self.sessions() as session:
             for result in results:
                 session.execute(text(f"""
-                    INSERT INTO {S}.eval_result
+                    INSERT INTO {S}.askcontent_eval_result
                         (org_id, run_id, case_id, question, passed, failures,
                          answer, cited, grounded, elapsed_ms)
                     VALUES (:o, CAST(:run AS uuid),
@@ -232,7 +232,7 @@ class EvaluationService:
                     "ms": result.elapsed_ms,
                 })
             session.execute(text(f"""
-                UPDATE {S}.eval_run SET
+                UPDATE {S}.askcontent_eval_run SET
                     finished_at = now(), total = :t, passed = :p, failed = :f
                 WHERE id = CAST(:run AS uuid)
             """), {

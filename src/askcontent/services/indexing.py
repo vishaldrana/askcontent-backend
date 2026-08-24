@@ -104,7 +104,7 @@ class IndexingService:
 
         with self.sessions() as session:
             connector_id = session.execute(text(
-                f"SELECT id FROM {S}.connector WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_connector WHERE org_id = :o AND slug = :s"
             ), {"o": self.org_id, "s": connector.connector_id}).scalar_one()
 
             # What we already hold, so unchanged content costs nothing.
@@ -114,11 +114,11 @@ class IndexingService:
                     SELECT d.doc_id, d.text_hash, d.file_hash, d.parser_version,
                            d.content_hash, d.structure_hash,
                            EXISTS (
-                               SELECT 1 FROM {S}.document_chunk c
+                               SELECT 1 FROM {S}.askcontent_document_chunk c
                                WHERE c.document_id = d.id
                                  AND c.chunker_version = :chunker
                            ) AS chunks_current
-                    FROM {S}.document d WHERE d.connector_id = :c
+                    FROM {S}.askcontent_document d WHERE d.connector_id = :c
                 """), {"c": connector_id, "chunker": CHUNKER_VERSION}).all()
             }
 
@@ -240,7 +240,7 @@ class IndexingService:
         )
 
         return session.execute(text(f"""
-            INSERT INTO {S}.document (
+            INSERT INTO {S}.askcontent_document (
                 org_id, connector_id, doc_id, title, url, path, space, owner,
                 labels, source_version, source_updated_at, sensitivity,
                 acl_principals, mime, size_bytes, file_hash, text_hash,
@@ -282,9 +282,9 @@ class IndexingService:
                 content_hash = EXCLUDED.content_hash,
                 structure_hash = EXCLUDED.structure_hash,
                 last_content_change_at = CASE WHEN :content_moved THEN now()
-                    ELSE {S}.document.last_content_change_at END,
+                    ELSE {S}.askcontent_document.last_content_change_at END,
                 last_cosmetic_change_at = CASE WHEN :cosmetic THEN now()
-                    ELSE {S}.document.last_cosmetic_change_at END,
+                    ELSE {S}.askcontent_document.last_cosmetic_change_at END,
                 in_scope = true, missing_since = NULL, last_seen_at = now()
             RETURNING id
         """), {
@@ -318,11 +318,11 @@ class IndexingService:
         # document whose text changed has different chunks, and leaving the old
         # ones would let a citation resolve to text the document no longer says.
         session.execute(text(
-            f"DELETE FROM {S}.document_chunk WHERE document_id = :d"
+            f"DELETE FROM {S}.askcontent_document_chunk WHERE document_id = :d"
         ), {"d": document_id})
         for chunk in chunks:
             session.execute(text(f"""
-                INSERT INTO {S}.document_chunk (
+                INSERT INTO {S}.askcontent_document_chunk (
                     org_id, connector_id, document_id, chunk_id, ordinal, text,
                     heading_path, overlap, parent_text, page, is_table, is_code,
                     token_estimate, chunker_version
@@ -342,7 +342,7 @@ class IndexingService:
     def _write_embeddings(self, session, connector_id, chunks, vectors, embedder) -> None:
         for chunk, vector in zip(chunks, vectors):
             session.execute(text(f"""
-                INSERT INTO {S}.embedding (
+                INSERT INTO {S}.askcontent_embedding (
                     org_id, connector_id, kind, ref_id, parent_ref, content_hash,
                     model_id, dimension, vector
                 ) VALUES (
@@ -381,8 +381,8 @@ def search_chunks(
             SELECT e.ref_id AS chunk_id, e.parent_ref AS doc_id,
                    1 - (e.vector <=> CAST(:q AS vector)) AS score,
                    c.text, c.heading_path, c.parent_text, c.page
-            FROM {S}.embedding e
-            JOIN {S}.document_chunk c ON c.chunk_id = e.ref_id
+            FROM {S}.askcontent_embedding e
+            JOIN {S}.askcontent_document_chunk c ON c.chunk_id = e.ref_id
                                      AND c.connector_id = e.connector_id
             WHERE e.connector_id = :c AND e.kind = 'chunk'
               AND (:model IS NULL OR e.model_id = :model)

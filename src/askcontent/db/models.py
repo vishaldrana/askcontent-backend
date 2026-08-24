@@ -86,11 +86,11 @@ class TenantMixin:
 
     @property
     def __org_fk__(self) -> str:
-        return f"{settings.db_schema}.org.id"
+        return f"{settings.db_schema}.askcontent_org.id"
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(f"{settings.db_schema}.org.id", ondelete="CASCADE"),
+        ForeignKey(f"{settings.db_schema}.askcontent_org.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -102,7 +102,7 @@ class TenantMixin:
 
 
 class Org(Base, PkMixin, TimestampMixin):
-    __tablename__ = "org"
+    __tablename__ = "askcontent_org"
 
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -110,7 +110,7 @@ class Org(Base, PkMixin, TimestampMixin):
 
 
 class AppUser(Base, PkMixin, TimestampMixin):
-    __tablename__ = "app_user"
+    __tablename__ = "askcontent_app_user"
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(200))
@@ -119,11 +119,11 @@ class AppUser(Base, PkMixin, TimestampMixin):
 
 
 class Membership(Base, PkMixin, TenantMixin, TimestampMixin):
-    __tablename__ = "membership"
+    __tablename__ = "askcontent_membership"
     __table_args__ = (UniqueConstraint("org_id", "user_id"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.app_user.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_app_user.id", ondelete="CASCADE")
     )
     role: Mapped[str] = mapped_column(String(32), default="member", nullable=False)
 
@@ -135,7 +135,7 @@ class Workspace(Base, PkMixin, TenantMixin, TimestampMixin):
     connector and whose members ask questions of it (CNT-CON-02).
     """
 
-    __tablename__ = "workspace"
+    __tablename__ = "askcontent_workspace"
     __table_args__ = (UniqueConstraint("org_id", "slug"),)
 
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -152,11 +152,11 @@ class AuthSession(Base, PkMixin, TimestampMixin):
     read without already holding its token.
     """
 
-    __tablename__ = "auth_session"
+    __tablename__ = "askcontent_auth_session"
 
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.app_user.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_app_user.id", ondelete="CASCADE")
     )
     org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -177,7 +177,7 @@ class Knowledgebase(Base, PkMixin, TenantMixin, TimestampMixin):
     different scopes for different groups (CNT-CON-06).
     """
 
-    __tablename__ = "knowledgebase"
+    __tablename__ = "askcontent_knowledgebase"
     __table_args__ = (UniqueConstraint("org_id", "kb_id"),)
 
     kb_id: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -202,7 +202,7 @@ class Connector(Base, PkMixin, TenantMixin, TimestampMixin):
     into columns would invite a second, divergent evaluation in SQL.
     """
 
-    __tablename__ = "connector"
+    __tablename__ = "askcontent_connector"
     __table_args__ = (
         UniqueConstraint("org_id", "slug"),
         CheckConstraint("state in ('draft','active','suspended')", name="state"),
@@ -211,10 +211,10 @@ class Connector(Base, PkMixin, TenantMixin, TimestampMixin):
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.workspace.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_workspace.id", ondelete="CASCADE")
     )
     knowledgebase_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.knowledgebase.id", ondelete="RESTRICT")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_knowledgebase.id", ondelete="RESTRICT")
     )
     state: Mapped[str] = mapped_column(String(16), default="draft", nullable=False)
 
@@ -272,11 +272,11 @@ class FieldRule(Base, PkMixin, TenantMixin, TimestampMixin):
     remote-execution surface in an admin console.
     """
 
-    __tablename__ = "field_rule"
+    __tablename__ = "askcontent_field_rule"
     __table_args__ = (UniqueConstraint("connector_id", "target"),)
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     target: Mapped[str] = mapped_column(String(64), nullable=False)
     source: Mapped[str | None] = mapped_column(String(200))
@@ -305,16 +305,16 @@ class Document(Base, PkMixin, TenantMixin, TimestampMixin):
       Meaning    doc_type, confidence, authority, staleness, sensitivity
     """
 
-    __tablename__ = "document"
+    __tablename__ = "askcontent_document"
     __table_args__ = (
         UniqueConstraint("connector_id", "doc_id"),
-        Index("ix_document_scope", "connector_id", "in_scope"),
-        Index("ix_document_space", "connector_id", "space"),
-        Index("ix_document_updated", "connector_id", "source_updated_at"),
+        Index("ix_askcontent_document_scope", "connector_id", "in_scope"),
+        Index("ix_askcontent_document_space", "connector_id", "space"),
+        Index("ix_askcontent_document_updated", "connector_id", "source_updated_at"),
     )
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     connector = relationship("Connector", back_populates="documents")
 
@@ -384,11 +384,11 @@ class DocumentPin(Base, PkMixin, TenantMixin, TimestampMixin):
     with flags because its schema is stable; a corpus is not.
     """
 
-    __tablename__ = "document_pin"
+    __tablename__ = "askcontent_document_pin"
     __table_args__ = (UniqueConstraint("connector_id", "doc_id", "field"),)
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     doc_id: Mapped[str] = mapped_column(String(300), nullable=False)
     field: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -400,10 +400,10 @@ class DocumentPin(Base, PkMixin, TenantMixin, TimestampMixin):
 class AuthorityRule(Base, PkMixin, TenantMixin, TimestampMixin):
     """Tier by rule (CNT-CAT-05); a pin overrides it and nothing overrides a pin."""
 
-    __tablename__ = "authority_rule"
+    __tablename__ = "askcontent_authority_rule"
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     ordinal: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     space: Mapped[str | None] = mapped_column(String(200))
@@ -420,17 +420,17 @@ class DocumentChunk(Base, PkMixin, TenantMixin, TimestampMixin):
     not rot when a document is re-parsed.
     """
 
-    __tablename__ = "document_chunk"
+    __tablename__ = "askcontent_document_chunk"
     __table_args__ = (
         UniqueConstraint("document_id", "ordinal"),
-        Index("ix_chunk_chunk_id", "connector_id", "chunk_id"),
+        Index("ix_askcontent_chunk_chunk_id", "connector_id", "chunk_id"),
     )
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.document.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_document.id", ondelete="CASCADE")
     )
     document = relationship("Document", back_populates="chunks")
 
@@ -466,14 +466,14 @@ class Embedding(Base, PkMixin, TenantMixin, TimestampMixin):
     effectively free: unchanged content is skipped without an embedding call.
     """
 
-    __tablename__ = "embedding"
+    __tablename__ = "askcontent_embedding"
     __table_args__ = (
         UniqueConstraint("connector_id", "kind", "ref_id", "model_id"),
-        Index("ix_embedding_lookup", "connector_id", "kind"),
+        Index("ix_askcontent_embedding_lookup", "connector_id", "kind"),
     )
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     kind: Mapped[str] = mapped_column(String(24), nullable=False)  # chunk | document | term
     ref_id: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -501,13 +501,13 @@ class RetrievalPlan(Base, PkMixin, TenantMixin, TimestampMixin):
     an explicit purge (CNT-RNK-06).
     """
 
-    __tablename__ = "retrieval_plan"
+    __tablename__ = "askcontent_retrieval_plan"
     __table_args__ = (
         UniqueConstraint("connector_id", "question_hash", "catalog_version", "reranker_id"),
     )
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     question_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
@@ -530,11 +530,11 @@ class GlossaryTerm(Base, PkMixin, TenantMixin, TimestampMixin):
     a plausible synonym.
     """
 
-    __tablename__ = "glossary_term"
+    __tablename__ = "askcontent_glossary_term"
     __table_args__ = (UniqueConstraint("connector_id", "term"),)
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     term: Mapped[str] = mapped_column(String(200), nullable=False)
     definition: Mapped[str] = mapped_column(Text, nullable=False)
@@ -548,16 +548,16 @@ class GlossaryTerm(Base, PkMixin, TenantMixin, TimestampMixin):
 
 
 class Thread(Base, PkMixin, TenantMixin, TimestampMixin):
-    __tablename__ = "thread"
+    __tablename__ = "askcontent_thread"
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.workspace.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_workspace.id", ondelete="CASCADE")
     )
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.app_user.id", ondelete="SET NULL")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_app_user.id", ondelete="SET NULL")
     )
     title: Mapped[str | None] = mapped_column(Text)
 
@@ -570,11 +570,11 @@ class Message(Base, PkMixin, TenantMixin, TimestampMixin):
     reload?" as part of the definition of done for every answer feature.
     """
 
-    __tablename__ = "message"
-    __table_args__ = (Index("ix_message_thread", "thread_id", "created_at"),)
+    __tablename__ = "askcontent_message"
+    __table_args__ = (Index("ix_askcontent_message_thread", "thread_id", "created_at"),)
 
     thread_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.thread.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_thread.id", ondelete="CASCADE")
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     text: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -596,11 +596,11 @@ class RetrievalRun(Base, PkMixin, TenantMixin, TimestampMixin):
     see", and a pattern of denials is a signal worth having.
     """
 
-    __tablename__ = "retrieval_run"
-    __table_args__ = (Index("ix_run_connector_time", "connector_id", "created_at"),)
+    __tablename__ = "askcontent_retrieval_run"
+    __table_args__ = (Index("ix_askcontent_run_connector_time", "connector_id", "created_at"),)
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     actor: Mapped[str] = mapped_column(String(320), nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
@@ -625,10 +625,10 @@ class ScopeChange(Base, PkMixin, TenantMixin, TimestampMixin):
     was shown when they decided, not what a later recomputation would say.
     """
 
-    __tablename__ = "scope_change"
+    __tablename__ = "askcontent_scope_change"
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     actor: Mapped[str] = mapped_column(String(320), nullable=False)
     scope_before: Mapped[dict | None] = mapped_column(JSONB)
@@ -644,22 +644,22 @@ class ScopeChange(Base, PkMixin, TenantMixin, TimestampMixin):
 
 
 class RbacRole(Base, PkMixin, TenantMixin, TimestampMixin):
-    __tablename__ = "rbac_role"
+    __tablename__ = "askcontent_rbac_role"
     __table_args__ = (UniqueConstraint("connector_id", "name"),)
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
 
 
 class RbacRoleMember(Base, PkMixin, TenantMixin, TimestampMixin):
-    __tablename__ = "rbac_role_member"
+    __tablename__ = "askcontent_rbac_role_member"
     __table_args__ = (UniqueConstraint("role_id", "principal"),)
 
     role_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.rbac_role.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_rbac_role.id", ondelete="CASCADE")
     )
     principal: Mapped[str] = mapped_column(String(320), nullable=False)
 
@@ -669,10 +669,10 @@ class RbacLabelRule(Base, PkMixin, TenantMixin, TimestampMixin):
     label. There is no masking analogue: you cannot redact a paragraph the way
     you redact a column and still have a citable span."""
 
-    __tablename__ = "rbac_label_rule"
+    __tablename__ = "askcontent_rbac_label_rule"
 
     role_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.rbac_role.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_rbac_role.id", ondelete="CASCADE")
     )
     space: Mapped[str | None] = mapped_column(String(200))
     label: Mapped[str | None] = mapped_column(String(200))
@@ -683,10 +683,10 @@ class RbacPolicyVersion(Base, PkMixin, TenantMixin, TimestampMixin):
     """PLT-DM-16 — bumps on any change, so cached projections invalidate
     immediately without an explicit purge."""
 
-    __tablename__ = "rbac_policy_version"
+    __tablename__ = "askcontent_rbac_policy_version"
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     changed_by: Mapped[str | None] = mapped_column(String(320))
@@ -698,11 +698,11 @@ class RbacPolicyVersion(Base, PkMixin, TenantMixin, TimestampMixin):
 
 
 class Job(Base, PkMixin, TenantMixin, TimestampMixin):
-    __tablename__ = "job"
-    __table_args__ = (Index("ix_job_queue", "status", "created_at"),)
+    __tablename__ = "askcontent_job"
+    __table_args__ = (Index("ix_askcontent_job_queue", "status", "created_at"),)
 
     connector_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="queued", nullable=False)
@@ -719,10 +719,10 @@ class QuarantineItem(Base, PkMixin, TenantMixin, TimestampMixin):
     what class of thing matched, not to make a second copy of the secret.
     """
 
-    __tablename__ = "quarantine_item"
+    __tablename__ = "askcontent_quarantine_item"
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     doc_id: Mapped[str] = mapped_column(String(300), nullable=False)
     matched_class: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -735,11 +735,11 @@ class Embed(Base, PkMixin, TenantMixin, TimestampMixin):
     """WGT-10 — a publishable key resolves to exactly one connector,
     server-side. The widget cannot name a connector; there is no field for it."""
 
-    __tablename__ = "embed"
+    __tablename__ = "askcontent_embed"
     __table_args__ = (UniqueConstraint("publishable_key"),)
 
     connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.connector.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_connector.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     publishable_key: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -748,10 +748,10 @@ class Embed(Base, PkMixin, TenantMixin, TimestampMixin):
 
 
 class EmbedSession(Base, PkMixin, TenantMixin, TimestampMixin):
-    __tablename__ = "embed_session"
+    __tablename__ = "askcontent_embed_session"
 
     embed_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.embed.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey(f"{settings.db_schema}.askcontent_embed.id", ondelete="CASCADE")
     )
     # WGT-02 — identity is required; there is no anonymous mode, so this column
     # is NOT nullable by design.
@@ -769,7 +769,7 @@ class ControlBase(DeclarativeBase):
 
 
 class Tenant(ControlBase, PkMixin, TimestampMixin):
-    __tablename__ = "tenant"
+    __tablename__ = "askcontent_tenant"
 
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -784,10 +784,10 @@ class Tenant(ControlBase, PkMixin, TimestampMixin):
 
 
 class TenantMigration(ControlBase, PkMixin, TimestampMixin):
-    __tablename__ = "tenant_migration"
+    __tablename__ = "askcontent_tenant_migration"
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("askcontent_control.tenant.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("askcontent_control.askcontent_tenant.id", ondelete="CASCADE")
     )
     revision: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -795,20 +795,20 @@ class TenantMigration(ControlBase, PkMixin, TimestampMixin):
 
 
 class GlobalUser(ControlBase, PkMixin, TimestampMixin):
-    __tablename__ = "global_user"
+    __tablename__ = "askcontent_global_user"
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
 
 
 class UserTenant(ControlBase, PkMixin, TimestampMixin):
-    __tablename__ = "user_tenant"
+    __tablename__ = "askcontent_user_tenant"
     __table_args__ = (UniqueConstraint("global_user_id", "tenant_id"),)
 
     global_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("askcontent_control.global_user.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("askcontent_control.askcontent_global_user.id", ondelete="CASCADE")
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("askcontent_control.tenant.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("askcontent_control.askcontent_tenant.id", ondelete="CASCADE")
     )
 
 

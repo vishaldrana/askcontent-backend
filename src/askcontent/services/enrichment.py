@@ -35,13 +35,13 @@ class EnrichmentService:
     def enrich_collection(self, slug: str, limit: int = 500) -> dict:
         with self.sessions() as session:
             collection = session.execute(text(
-                f"SELECT id FROM {S}.collection WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_collection WHERE org_id = :o AND slug = :s"
             ), {"o": self.org_id, "s": slug}).mappings().one_or_none()
             if collection is None:
                 raise KeyError(slug)
 
             members = session.execute(text(f"""
-                SELECT doc_id, kb_id FROM {S}.collection_member
+                SELECT doc_id, kb_id FROM {S}.askcontent_collection_member
                 WHERE collection_id = :c AND state <> 'removed'
                 ORDER BY last_checked_at NULLS FIRST LIMIT :n
             """), {"c": collection["id"], "n": limit}).mappings().all()
@@ -58,7 +58,7 @@ class EnrichmentService:
                 if detail is None:
                     counts["unreadable"] += 1
                     session.execute(text(f"""
-                        UPDATE {S}.collection_member
+                        UPDATE {S}.askcontent_collection_member
                         SET last_checked_at = now()
                         WHERE collection_id = :c AND doc_id = :d
                     """), {"c": collection["id"], "d": member["doc_id"]})
@@ -69,7 +69,7 @@ class EnrichmentService:
                 counts["enriched"] += 1
 
                 session.execute(text(f"""
-                    UPDATE {S}.collection_member SET
+                    UPDATE {S}.askcontent_collection_member SET
                         title = coalesce(:title, title),
                         url = coalesce(:url, url),
                         description = :description,
@@ -158,14 +158,14 @@ class EnrichmentService:
         """
         with self.sessions() as session:
             collection = session.execute(text(
-                f"SELECT id FROM {S}.collection WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_collection WHERE org_id = :o AND slug = :s"
             ), {"o": self.org_id, "s": slug}).mappings().one_or_none()
             if collection is None:
                 raise KeyError(slug)
 
             members = session.execute(text(f"""
                 SELECT doc_id, kb_id, content_hash, structure_hash, source_updated_at
-                FROM {S}.collection_member
+                FROM {S}.askcontent_collection_member
                 WHERE collection_id = :c AND state <> 'removed'
                 ORDER BY last_checked_at NULLS FIRST LIMIT :n
             """), {"c": collection["id"], "n": limit}).mappings().all()
@@ -180,7 +180,7 @@ class EnrichmentService:
                     # Present in the collection, no longer readable at source.
                     report["gone"] += 1
                     session.execute(text(f"""
-                        UPDATE {S}.collection_member
+                        UPDATE {S}.askcontent_collection_member
                         SET missing_since = coalesce(missing_since, now()),
                             last_checked_at = now()
                         WHERE collection_id = :c AND doc_id = :d
@@ -205,7 +205,7 @@ class EnrichmentService:
                     report["unchanged"] += 1
 
                 session.execute(text(f"""
-                    UPDATE {S}.collection_member SET
+                    UPDATE {S}.askcontent_collection_member SET
                         title = coalesce(:title, title), url = coalesce(:url, url),
                         description = :description, space = :space, path = :path,
                         owner = :owner, doc_type = :doc_type,

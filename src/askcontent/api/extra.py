@@ -84,12 +84,12 @@ def list_collections() -> list[dict]:
         rows = session.execute(text(f"""
             SELECT c.id, c.slug, c.name, c.description, c.business_group, c.state,
                    c.materialised_at, c.version, c.auto_accept_enumerable,
-                   (SELECT count(*) FROM {S}.collection_rule r WHERE r.collection_id = c.id) AS rules,
-                   (SELECT count(*) FROM {S}.collection_member m
+                   (SELECT count(*) FROM {S}.askcontent_collection_rule r WHERE r.collection_id = c.id) AS rules,
+                   (SELECT count(*) FROM {S}.askcontent_collection_member m
                      WHERE m.collection_id = c.id AND m.state = 'member') AS members,
-                   (SELECT count(*) FROM {S}.collection_member m
+                   (SELECT count(*) FROM {S}.askcontent_collection_member m
                      WHERE m.collection_id = c.id AND m.state = 'proposed') AS proposed
-            FROM {S}.collection c WHERE c.org_id = :org ORDER BY c.name
+            FROM {S}.askcontent_collection c WHERE c.org_id = :org ORDER BY c.name
         """), {"org": _org(session)}).mappings().all()
         return [dict(r) | {"id": str(r["id"])} for r in rows]
 
@@ -98,7 +98,7 @@ def list_collections() -> list[dict]:
 def create_collection(body: CollectionCreate) -> dict:
     with _sessions()() as session:
         row = session.execute(text(f"""
-            INSERT INTO {S}.collection (org_id, slug, name, description, business_group)
+            INSERT INTO {S}.askcontent_collection (org_id, slug, name, description, business_group)
             VALUES (:org, :slug, :name, :description, :group)
             ON CONFLICT (org_id, slug) DO UPDATE SET name = EXCLUDED.name,
                 description = EXCLUDED.description, business_group = EXCLUDED.business_group
@@ -116,7 +116,7 @@ def get_collection(slug: str) -> dict:
         rules = session.execute(text(f"""
             SELECT id, ordinal, kind, effect, config, enumerable, last_run_at,
                    last_candidate_count, capped
-            FROM {S}.collection_rule WHERE collection_id = :cid ORDER BY ordinal, created_at
+            FROM {S}.askcontent_collection_rule WHERE collection_id = :cid ORDER BY ordinal, created_at
         """), {"cid": collection["id"]}).mappings().all()
         return dict(collection) | {
             "id": str(collection["id"]),
@@ -128,7 +128,7 @@ def get_collection(slug: str) -> dict:
 
 def _collection_row(session, slug: str):
     row = session.execute(text(f"""
-        SELECT * FROM {S}.collection WHERE org_id = :org AND slug = :slug
+        SELECT * FROM {S}.askcontent_collection WHERE org_id = :org AND slug = :slug
     """), {"org": _org(session), "slug": slug}).mappings().one_or_none()
     if row is None:
         raise HTTPException(404, f"unknown collection {slug}")
@@ -148,10 +148,10 @@ def add_rule(slug: str, body: RuleCreate) -> dict:
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         ordinal = session.execute(text(
-            f"SELECT coalesce(max(ordinal), -1) + 1 FROM {S}.collection_rule WHERE collection_id = :c"
+            f"SELECT coalesce(max(ordinal), -1) + 1 FROM {S}.askcontent_collection_rule WHERE collection_id = :c"
         ), {"c": collection["id"]}).scalar_one()
         rid = session.execute(text(f"""
-            INSERT INTO {S}.collection_rule
+            INSERT INTO {S}.askcontent_collection_rule
                 (org_id, collection_id, ordinal, kind, effect, config, enumerable)
             VALUES (:org, :cid, :ord, :kind, :effect, :config, :enum) RETURNING id
         """), {"org": _org(session), "cid": collection["id"], "ord": ordinal,
@@ -228,7 +228,7 @@ def delete_rule(slug: str, rule_id: str) -> dict:
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         session.execute(text(
-            f"DELETE FROM {S}.collection_rule WHERE id = :r AND collection_id = :c"
+            f"DELETE FROM {S}.askcontent_collection_rule WHERE id = :r AND collection_id = :c"
         ), {"r": rule_id, "c": collection["id"]})
         session.commit()
     # Membership is deliberately untouched: a document another rule also claims
@@ -251,7 +251,7 @@ def materialise(slug: str, body: Materialise) -> dict:
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         rules = session.execute(text(f"""
-            SELECT id, kind, effect, config, enumerable FROM {S}.collection_rule
+            SELECT id, kind, effect, config, enumerable FROM {S}.askcontent_collection_rule
             WHERE collection_id = :c ORDER BY ordinal
         """), {"c": collection["id"]}).mappings().all()
 
@@ -280,7 +280,7 @@ def materialise(slug: str, body: Materialise) -> dict:
         existing = {
             r["doc_id"]: dict(r)
             for r in session.execute(text(f"""
-                SELECT doc_id, state, pinned FROM {S}.collection_member WHERE collection_id = :c
+                SELECT doc_id, state, pinned FROM {S}.askcontent_collection_member WHERE collection_id = :c
             """), {"c": collection["id"]}).mappings().all()
         }
 
@@ -320,7 +320,7 @@ def materialise(slug: str, body: Materialise) -> dict:
             )
             state = "member" if (auto and enumerable_only) else "proposed"
             session.execute(text(f"""
-                INSERT INTO {S}.collection_member
+                INSERT INTO {S}.askcontent_collection_member
                     (org_id, collection_id, doc_id, kb_id, title, url, contributed_by,
                      resolved_via, resolve_score, state)
                 VALUES (:org, :cid, :doc, :kb, :title, :url, :by, :via, :score, :state)
@@ -329,9 +329,9 @@ def materialise(slug: str, body: Materialise) -> dict:
                       -- Refresh the display copy too. A member whose title was
                       -- captured before the index had one would otherwise show
                       -- its identifier forever.
-                      title = coalesce(EXCLUDED.title, {S}.collection_member.title),
-                      url = coalesce(EXCLUDED.url, {S}.collection_member.url),
-                      kb_id = coalesce(EXCLUDED.kb_id, {S}.collection_member.kb_id),
+                      title = coalesce(EXCLUDED.title, {S}.askcontent_collection_member.title),
+                      url = coalesce(EXCLUDED.url, {S}.askcontent_collection_member.url),
+                      kb_id = coalesce(EXCLUDED.kb_id, {S}.askcontent_collection_member.kb_id),
                       missing_since = NULL
             """), {"org": _org(session), "cid": collection["id"], "doc": doc_id,
                    "kb": hit.get("kb_id"), "title": hit.get("title"), "url": hit.get("url"),
@@ -343,12 +343,12 @@ def materialise(slug: str, body: Materialise) -> dict:
             # mistake, and a hard delete turns a two-minute undo into a
             # re-materialisation (CNT-COL-11).
             session.execute(text(f"""
-                UPDATE {S}.collection_member SET state = 'removed', missing_since = now()
+                UPDATE {S}.askcontent_collection_member SET state = 'removed', missing_since = now()
                 WHERE collection_id = :c AND doc_id = :d
             """), {"c": collection["id"], "d": doc_id})
 
         session.execute(text(
-            f"UPDATE {S}.collection SET materialised_at = now(), version = version + 1 WHERE id = :c"
+            f"UPDATE {S}.askcontent_collection SET materialised_at = now(), version = version + 1 WHERE id = :c"
         ), {"c": collection["id"]})
         session.commit()
 
@@ -381,7 +381,7 @@ def _evaluate(platform, rule, *, session=None, collection_id=None) -> tuple[list
             return [], False
         rows = session.execute(text(f"""
             SELECT doc_id, kb_id, title, url
-              FROM {S}.collection_member
+              FROM {S}.askcontent_collection_member
              WHERE collection_id = :c
                AND state <> 'removed'
                AND :rule = ANY(contributed_by)
@@ -522,7 +522,7 @@ def collection_detail(slug: str) -> dict:
         rules = session.execute(text(f"""
             SELECT id, ordinal, kind, effect, config, enumerable, last_run_at,
                    last_candidate_count, capped
-            FROM {S}.collection_rule WHERE collection_id = :c ORDER BY ordinal
+            FROM {S}.askcontent_collection_rule WHERE collection_id = :c ORDER BY ordinal
         """), {"c": collection["id"]}).mappings().all()
 
         members = session.execute(text(f"""
@@ -531,13 +531,13 @@ def collection_detail(slug: str) -> dict:
                    pinned, source_created_at, source_updated_at, created_source,
                    updated_source, date_evidence, first_seen_at, last_checked_at,
                    last_changed_at, missing_since
-            FROM {S}.collection_member WHERE collection_id = :c
+            FROM {S}.askcontent_collection_member WHERE collection_id = :c
             ORDER BY state, title NULLS LAST, doc_id
         """), {"c": collection["id"]}).mappings().all()
 
         jobs = session.execute(text(f"""
             SELECT CAST(id AS text) AS id, kind, status, progress, error, attempts, created_at, finished_at
-            FROM {S}.job WHERE collection_id = :c
+            FROM {S}.askcontent_job WHERE collection_id = :c
             ORDER BY created_at DESC LIMIT 8
         """), {"c": collection["id"]}).mappings().all()
 
@@ -624,7 +624,7 @@ def stream_job(job_id: str):
             with _sessions()() as session:
                 row = session.execute(text(f"""
                     SELECT status, progress, error, attempts, finished_at
-                    FROM {S}.job WHERE id = :id
+                    FROM {S}.askcontent_job WHERE id = :id
                 """), {"id": job_id}).mappings().one_or_none()
 
             if row is None:
@@ -661,7 +661,7 @@ def list_jobs(limit: int = 20) -> list[dict]:
             SELECT j.id, j.kind, j.status, j.attempts, j.error, j.progress,
                    j.created_at, j.started_at, j.finished_at, j.locked_by,
                    c.slug AS collection
-            FROM {S}.job j LEFT JOIN {S}.collection c ON c.id = j.collection_id
+            FROM {S}.askcontent_job j LEFT JOIN {S}.askcontent_collection c ON c.id = j.collection_id
             WHERE j.org_id = :o ORDER BY j.created_at DESC LIMIT :n
         """), {"o": _org(session), "n": limit}).mappings().all()
         return [dict(r) | {"id": str(r["id"])} for r in rows]
@@ -675,14 +675,14 @@ def list_members(slug: str, state: str | None = None) -> dict:
         rows = session.execute(text(f"""
             SELECT m.doc_id, m.kb_id, m.title, m.url, m.contributed_by, m.state,
                    m.pinned, m.resolved_via, m.resolve_score, m.first_seen_at, m.missing_since
-            FROM {S}.collection_member m
+            FROM {S}.askcontent_collection_member m
             WHERE m.collection_id = :c {clause}
             ORDER BY m.state, m.title NULLS LAST, m.doc_id
         """), {"c": collection["id"], "state": state}).mappings().all()
         rules = {
             str(r["id"]): f'{r["kind"]}'
             for r in session.execute(text(
-                f"SELECT id, kind FROM {S}.collection_rule WHERE collection_id = :c"
+                f"SELECT id, kind FROM {S}.askcontent_collection_rule WHERE collection_id = :c"
             ), {"c": collection["id"]}).mappings().all()
         }
         return {
@@ -714,14 +714,14 @@ def pin_member(slug: str, body: Pin) -> dict:
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         session.execute(text(f"""
-            INSERT INTO {S}.collection_member
+            INSERT INTO {S}.askcontent_collection_member
                 (org_id, collection_id, doc_id, state, pinned, pinned_by)
             VALUES (:org, :c, :d, CASE WHEN :p = 'in' THEN 'member' ELSE 'removed' END, :p, :who)
             ON CONFLICT (collection_id, doc_id) DO UPDATE
               SET pinned = :p, pinned_by = :who,
                   state = CASE WHEN :p = 'in' THEN 'member'
                                WHEN :p = 'out' THEN 'removed'
-                               ELSE {S}.collection_member.state END
+                               ELSE {S}.askcontent_collection_member.state END
         """), {"org": _org(session), "c": collection["id"], "d": body.doc_id,
                "p": body.pinned, "who": body.actor})
         session.commit()
@@ -739,7 +739,7 @@ class RoleCreate(BaseModel):
 
 def _connector_id(session, slug: str) -> uuid.UUID:
     row = session.execute(text(
-        f"SELECT id FROM {S}.connector WHERE org_id = :o AND slug = :s"
+        f"SELECT id FROM {S}.askcontent_connector WHERE org_id = :o AND slug = :s"
     ), {"o": _org(session), "s": slug}).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, f"unknown connector {slug}")
@@ -757,16 +757,16 @@ def list_roles(slug: str) -> list[dict]:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         roles = session.execute(text(f"""
-            SELECT id, name, description FROM {S}.rbac_role
+            SELECT id, name, description FROM {S}.askcontent_rbac_role
             WHERE connector_id = :c ORDER BY name
         """), {"c": cid}).mappings().all()
         out = []
         for role in roles:
             members = session.execute(text(
-                f"SELECT principal FROM {S}.rbac_role_member WHERE role_id = :r ORDER BY principal"
+                f"SELECT principal FROM {S}.askcontent_rbac_role_member WHERE role_id = :r ORDER BY principal"
             ), {"r": role["id"]}).scalars().all()
             rules = session.execute(text(f"""
-                SELECT space, label, effect FROM {S}.rbac_label_rule WHERE role_id = :r
+                SELECT space, label, effect FROM {S}.askcontent_rbac_label_rule WHERE role_id = :r
             """), {"r": role["id"]}).mappings().all()
             out.append(dict(role) | {
                 "id": str(role["id"]),
@@ -781,21 +781,21 @@ def create_role(slug: str, body: RoleCreate) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rid = session.execute(text(f"""
-            INSERT INTO {S}.rbac_role (org_id, connector_id, name, description)
+            INSERT INTO {S}.askcontent_rbac_role (org_id, connector_id, name, description)
             VALUES (:o, :c, :n, :d)
             ON CONFLICT (connector_id, name) DO UPDATE SET description = EXCLUDED.description
             RETURNING id
         """), {"o": _org(session), "c": cid, "n": body.name, "d": body.description}).scalar_one()
-        session.execute(text(f"DELETE FROM {S}.rbac_role_member WHERE role_id = :r"), {"r": rid})
+        session.execute(text(f"DELETE FROM {S}.askcontent_rbac_role_member WHERE role_id = :r"), {"r": rid})
         for principal in body.principals:
             session.execute(text(f"""
-                INSERT INTO {S}.rbac_role_member (org_id, role_id, principal)
+                INSERT INTO {S}.askcontent_rbac_role_member (org_id, role_id, principal)
                 VALUES (:o, :r, :p) ON CONFLICT DO NOTHING
             """), {"o": _org(session), "r": rid, "p": principal})
         # Any change bumps the policy version, so a cached projection is
         # invalidated without an explicit purge.
         session.execute(text(
-            f"UPDATE {S}.connector SET policy_version = policy_version + 1 WHERE id = :c"
+            f"UPDATE {S}.askcontent_connector SET policy_version = policy_version + 1 WHERE id = :c"
         ), {"c": cid})
         session.commit()
         return {"id": str(rid), "name": body.name}
@@ -806,10 +806,10 @@ def delete_role(slug: str, role_id: str) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         session.execute(text(
-            f"DELETE FROM {S}.rbac_role WHERE id = :r AND connector_id = :c"
+            f"DELETE FROM {S}.askcontent_rbac_role WHERE id = :r AND connector_id = :c"
         ), {"r": role_id, "c": cid})
         session.execute(text(
-            f"UPDATE {S}.connector SET policy_version = policy_version + 1 WHERE id = :c"
+            f"UPDATE {S}.askcontent_connector SET policy_version = policy_version + 1 WHERE id = :c"
         ), {"c": cid})
         session.commit()
     return {"deleted": role_id}
@@ -848,17 +848,17 @@ def set_label_rules(slug: str, role_id: str, body: LabelRules) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         owned = session.execute(text(
-            f"SELECT 1 FROM {S}.rbac_role WHERE id = :r AND connector_id = :c"
+            f"SELECT 1 FROM {S}.askcontent_rbac_role WHERE id = :r AND connector_id = :c"
         ), {"r": role_id, "c": cid}).scalar_one_or_none()
         if not owned:
             raise HTTPException(404, "no such role on this connector")
 
         session.execute(text(
-            f"DELETE FROM {S}.rbac_label_rule WHERE role_id = :r"
+            f"DELETE FROM {S}.askcontent_rbac_label_rule WHERE role_id = :r"
         ), {"r": role_id})
         for rule in body.rules:
             session.execute(text(f"""
-                INSERT INTO {S}.rbac_label_rule (org_id, role_id, space, label, effect)
+                INSERT INTO {S}.askcontent_rbac_label_rule (org_id, role_id, space, label, effect)
                 VALUES (:o, :r, :s, :l, :e)
             """), {
                 "o": _org(session), "r": role_id, "s": rule.space,
@@ -867,7 +867,7 @@ def set_label_rules(slug: str, role_id: str, body: LabelRules) -> dict:
         # Any access change bumps the policy version, so a cached projection is
         # invalidated without an explicit purge.
         session.execute(text(
-            f"UPDATE {S}.connector SET policy_version = policy_version + 1 WHERE id = :c"
+            f"UPDATE {S}.askcontent_connector SET policy_version = policy_version + 1 WHERE id = :c"
         ), {"c": cid})
         session.commit()
     return {"role_id": role_id, "rules": len(body.rules)}
@@ -981,7 +981,7 @@ def list_models(kind: str = "answer") -> dict:
         org = _org(session)
         rows = session.execute(text(f"""
             SELECT vendor, model_id, name, note, is_default
-              FROM {S}.model_catalog
+              FROM {S}.askcontent_model_catalog
              WHERE org_id = :o AND kind = :k AND enabled
              ORDER BY ordinal, vendor, name
         """), {"o": org, "k": kind}).mappings().all()
@@ -989,7 +989,7 @@ def list_models(kind: str = "answer") -> dict:
         if not rows:
             for ordinal, (vendor, model_id, name, note, default) in enumerate(SEED_MODELS):
                 session.execute(text(f"""
-                    INSERT INTO {S}.model_catalog
+                    INSERT INTO {S}.askcontent_model_catalog
                         (org_id, kind, vendor, model_id, name, note, is_default, ordinal)
                     VALUES (:o, 'answer', :v, :m, :n, :note, :d, :ord)
                     ON CONFLICT (org_id, kind, vendor, model_id) DO NOTHING
@@ -998,7 +998,7 @@ def list_models(kind: str = "answer") -> dict:
             session.commit()
             rows = session.execute(text(f"""
                 SELECT vendor, model_id, name, note, is_default
-                  FROM {S}.model_catalog
+                  FROM {S}.askcontent_model_catalog
                  WHERE org_id = :o AND kind = :k AND enabled
                  ORDER BY ordinal, vendor, name
             """), {"o": org, "k": kind}).mappings().all()
@@ -1021,7 +1021,7 @@ def get_answering(slug: str) -> dict:
     with _sessions()() as session:
         row = session.execute(text(f"""
             SELECT answer_model, answer_tone, reranker, rerank_model, research
-              FROM {S}.connector WHERE org_id = :o AND slug = :s
+              FROM {S}.askcontent_connector WHERE org_id = :o AND slug = :s
         """), {"o": _org(session), "s": slug}).mappings().one()
 
     from ..adapters.rerankers.pool import CHOICES
@@ -1068,13 +1068,13 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
         org = _org(session)
         if model:
             known = session.execute(text(f"""
-                SELECT 1 FROM {S}.model_catalog
+                SELECT 1 FROM {S}.askcontent_model_catalog
                  WHERE org_id = :o AND model_id = :m AND kind = 'answer' AND enabled
             """), {"o": org, "m": model}).scalar_one_or_none()
             if not known:
                 raise HTTPException(400, f"{model} is not in this deployment's model catalogue")
         session.execute(text(f"""
-            UPDATE {S}.connector
+            UPDATE {S}.askcontent_connector
                SET answer_model = :m,
                    answer_tone = coalesce(:t, answer_tone),
                    reranker = :rr,
@@ -1102,7 +1102,7 @@ def _answering_for(slug: str) -> tuple[str | None, str]:
     """The model and the voice this connector answers in."""
     with _sessions()() as session:
         row = session.execute(text(f"""
-            SELECT answer_model, answer_tone FROM {S}.connector WHERE slug = :s
+            SELECT answer_model, answer_tone FROM {S}.askcontent_connector WHERE slug = :s
         """), {"s": slug}).mappings().one_or_none()
     if row is None:
         return None, ""
@@ -1272,7 +1272,7 @@ class ContextSourcePatch(BaseModel):
 def get_context_source(slug: str) -> dict:
     with _sessions()() as session:
         stored = session.execute(text(f"""
-            SELECT context_source FROM {S}.connector
+            SELECT context_source FROM {S}.askcontent_connector
              WHERE org_id = :o AND slug = :s
         """), {"o": _org(session), "s": slug}).scalar_one_or_none()
     return {"source": stored}
@@ -1321,7 +1321,7 @@ def set_context_source(slug: str, body: ContextSourcePatch) -> dict:
 
     with _sessions()() as session:
         session.execute(text(f"""
-            UPDATE {S}.connector SET context_source = CAST(:c AS jsonb), updated_at = now()
+            UPDATE {S}.askcontent_connector SET context_source = CAST(:c AS jsonb), updated_at = now()
              WHERE org_id = :o AND slug = :s
         """), {"c": json.dumps(source) if source else None,
                "o": _org(session), "s": slug})
@@ -1363,8 +1363,8 @@ def chat_starters(slug: str) -> dict:
             r["doc_id"]: r["chunks"]
             for r in session.execute(text(f"""
                 SELECT d.doc_id AS doc_id, count(*) AS chunks
-                  FROM {S}.document_chunk c
-                  JOIN {S}.document d ON d.id = c.document_id
+                  FROM {S}.askcontent_document_chunk c
+                  JOIN {S}.askcontent_document d ON d.id = c.document_id
                  WHERE c.connector_id = :c
                  GROUP BY d.doc_id
             """), {"c": cid}).mappings().all()
@@ -1426,8 +1426,8 @@ def _cached_openers(slug, connector, picked, platform) -> list[str]:
             r["doc_id"]: r["text"]
             for r in session.execute(text(f"""
                 SELECT DISTINCT ON (d.doc_id) d.doc_id AS doc_id, c.text AS text
-                  FROM {S}.document_chunk c
-                  JOIN {S}.document d ON d.id = c.document_id
+                  FROM {S}.askcontent_document_chunk c
+                  JOIN {S}.askcontent_document d ON d.id = c.document_id
                  WHERE c.connector_id = :c AND d.doc_id = ANY(:docs)
                  ORDER BY d.doc_id, c.ordinal
             """), {"c": cid, "docs": [p.doc_id for p in picked]}).mappings().all()
@@ -1462,15 +1462,15 @@ def effective_access(slug: str, role_id: str) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         principals = session.execute(text(
-            f"SELECT principal FROM {S}.rbac_role_member WHERE role_id = :r"
+            f"SELECT principal FROM {S}.askcontent_rbac_role_member WHERE role_id = :r"
         ), {"r": role_id}).scalars().all()
         name = session.execute(text(
-            f"SELECT name FROM {S}.rbac_role WHERE id = :r"
+            f"SELECT name FROM {S}.askcontent_rbac_role WHERE id = :r"
         ), {"r": role_id}).scalar_one_or_none()
         rules = tuple(
             RoleRule(effect=r["effect"], space=r["space"], label=r["label"])
             for r in session.execute(text(
-                f"SELECT effect, space, label FROM {S}.rbac_label_rule WHERE role_id = :r"
+                f"SELECT effect, space, label FROM {S}.askcontent_rbac_label_rule WHERE role_id = :r"
             ), {"r": role_id}).mappings().all()
         )
 
@@ -1543,7 +1543,7 @@ def list_terms(slug: str) -> dict:
         rows = session.execute(text(f"""
             SELECT id, term, definition, aliases, source, status, method,
                    confidence, occurrences, documents, evidence, updated_at
-            FROM {S}.glossary_term WHERE connector_id = :c
+            FROM {S}.askcontent_glossary_term WHERE connector_id = :c
             ORDER BY status, confidence DESC NULLS LAST, term
         """), {"c": cid}).mappings().all()
     terms = [dict(r) | {"id": str(r["id"])} for r in rows]
@@ -1588,7 +1588,7 @@ def review_term(slug: str, term_id: str, body: TermDecision) -> dict:
     with _sessions()() as session:
         _connector_id(session, slug)
         session.execute(text(f"""
-            UPDATE {S}.glossary_term
+            UPDATE {S}.askcontent_glossary_term
             -- `:s` is read as a value and as a comparand, and Postgres
             -- cannot infer one type from that. Cast it once, explicitly.
             SET status = CAST(:s AS varchar), reviewed_by = :who,
@@ -1608,7 +1608,7 @@ def create_term(slug: str, body: TermCreate) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rid = session.execute(text(f"""
-            INSERT INTO {S}.glossary_term
+            INSERT INTO {S}.askcontent_glossary_term
                 (org_id, connector_id, term, definition, aliases, source, status)
             -- Typed by a person, so already reviewed. Leaving it 'proposed'
             -- would mean a curated glossary does nothing until somebody also
@@ -1627,7 +1627,7 @@ def create_term(slug: str, body: TermCreate) -> dict:
 @router.delete("/api/connectors/{slug}/glossary/{term_id}")
 def delete_term(slug: str, term_id: str) -> dict:
     with _sessions()() as session:
-        session.execute(text(f"DELETE FROM {S}.glossary_term WHERE id = :t"), {"t": term_id})
+        session.execute(text(f"DELETE FROM {S}.askcontent_glossary_term WHERE id = :t"), {"t": term_id})
         session.commit()
     return {"deleted": term_id}
 
@@ -1692,7 +1692,7 @@ def list_embeds(slug: str) -> list[dict]:
         rows = session.execute(text(f"""
             SELECT id, name, publishable_key, allowed_origins, is_active,
                    appearance, session_count, last_used_at, created_at
-            FROM {S}.embed WHERE connector_id = :c ORDER BY created_at DESC
+            FROM {S}.askcontent_embed WHERE connector_id = :c ORDER BY created_at DESC
         """), {"c": cid}).mappings().all()
         return [dict(r) | {"id": str(r["id"])} for r in rows]
 
@@ -1706,7 +1706,7 @@ def create_embed(slug: str, body: EmbedCreate) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rid = session.execute(text(f"""
-            INSERT INTO {S}.embed (org_id, connector_id, name, publishable_key, allowed_origins)
+            INSERT INTO {S}.askcontent_embed (org_id, connector_id, name, publishable_key, allowed_origins)
             VALUES (:o, :c, :n, :k, :orig) RETURNING id
         """), {"o": _org(session), "c": cid, "n": body.name, "k": key,
                "orig": body.allowed_origins}).scalar_one()
@@ -1746,7 +1746,7 @@ def update_embed(slug: str, embed_id: str, body: EmbedPatch) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         row = session.execute(text(f"""
-            UPDATE {S}.embed SET
+            UPDATE {S}.askcontent_embed SET
                 name = coalesce(:n, name),
                 allowed_origins = coalesce(:orig, allowed_origins),
                 is_active = coalesce(:act, is_active),
@@ -1777,7 +1777,7 @@ def embed_snippet(slug: str, embed_id: str, base: str | None = None) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         row = session.execute(text(f"""
-            SELECT publishable_key, appearance FROM {S}.embed
+            SELECT publishable_key, appearance FROM {S}.askcontent_embed
             WHERE id = CAST(:e AS uuid) AND connector_id = :c
         """), {"e": embed_id, "c": cid}).mappings().one_or_none()
     if row is None:
@@ -1853,7 +1853,7 @@ export function Assistant({{ user }}) {{
 @router.delete("/api/connectors/{slug}/embeds/{embed_id}")
 def delete_embed(slug: str, embed_id: str) -> dict:
     with _sessions()() as session:
-        session.execute(text(f"DELETE FROM {S}.embed WHERE id = :e"), {"e": embed_id})
+        session.execute(text(f"DELETE FROM {S}.askcontent_embed WHERE id = :e"), {"e": embed_id})
         session.commit()
     return {"deleted": embed_id}
 
@@ -1885,7 +1885,7 @@ def update_settings(slug: str, body: SettingsPatch) -> dict:
 
     with _sessions()() as session:
         session.execute(text(f"""
-            UPDATE {S}.connector SET
+            UPDATE {S}.askcontent_connector SET
                 name = coalesce(:n, name),
                 description = coalesce(:d, description),
                 system_instructions = coalesce(:si, system_instructions),
@@ -1902,7 +1902,7 @@ def update_settings(slug: str, body: SettingsPatch) -> dict:
 def _instructions_for(slug: str) -> str:
     with _sessions()() as session:
         return session.execute(text(
-            f"SELECT system_instructions FROM {S}.connector "
+            f"SELECT system_instructions FROM {S}.askcontent_connector "
             f"WHERE org_id = :o AND slug = :s"
         ), {"o": _org(session), "s": slug}).scalar_one_or_none() or ""
 
@@ -1951,15 +1951,15 @@ def get_settings(slug: str) -> dict:
         cid = _connector_id(session, slug)
         quarantine = session.execute(text(f"""
             SELECT doc_id, matched_class, redacted_span, status, created_at
-            FROM {S}.quarantine_item WHERE connector_id = :c ORDER BY created_at DESC LIMIT 50
+            FROM {S}.askcontent_quarantine_item WHERE connector_id = :c ORDER BY created_at DESC LIMIT 50
         """), {"c": cid}).mappings().all()
         jobs = session.execute(text(f"""
-            SELECT kind, status, progress, error, created_at FROM {S}.job
+            SELECT kind, status, progress, error, created_at FROM {S}.askcontent_job
             WHERE connector_id = :c ORDER BY created_at DESC LIMIT 10
         """), {"c": cid}).mappings().all()
         row_extra = session.execute(text(f"""
             SELECT name, description, system_instructions
-            FROM {S}.connector WHERE id = :c
+            FROM {S}.askcontent_connector WHERE id = :c
         """), {"c": cid}).mappings().one()
 
     # Which answerer is actually in use. Reported here because the fallback is
@@ -2045,7 +2045,7 @@ def _research_config_for(slug: str, override: dict | None = None) -> dict | None
     """The connector's research config, with this turn's choices on top."""
     with _sessions()() as session:
         stored = session.execute(text(f"""
-            SELECT research FROM {S}.connector WHERE slug = :s
+            SELECT research FROM {S}.askcontent_connector WHERE slug = :s
         """), {"s": slug}).scalar_one_or_none()
     if not override:
         return stored
@@ -2169,8 +2169,8 @@ def _principal_for_role(slug: str, role: str | None) -> str:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         row = session.execute(text(f"""
-            SELECT m.principal FROM {S}.rbac_role r
-            JOIN {S}.rbac_role_member m ON m.role_id = r.id
+            SELECT m.principal FROM {S}.askcontent_rbac_role r
+            JOIN {S}.askcontent_rbac_role_member m ON m.role_id = r.id
             WHERE r.connector_id = :c AND r.name = :n ORDER BY m.principal LIMIT 1
         """), {"c": cid, "n": role}).scalar_one_or_none()
     # A role with no principals grants nothing. Falling back to a broad
@@ -2200,10 +2200,10 @@ def _answer_about_the_corpus(slug: str, question: str) -> str | None:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         row = session.execute(text(f"""
-            SELECT name, description FROM {S}.connector WHERE id = :c
+            SELECT name, description FROM {S}.askcontent_connector WHERE id = :c
         """), {"c": cid}).mappings().one()
         terms = session.execute(text(f"""
-            SELECT term FROM {S}.glossary_term
+            SELECT term FROM {S}.askcontent_glossary_term
             WHERE connector_id = :c AND (status = 'confirmed' OR source = 'human')
             ORDER BY coalesce(documents, 0) DESC LIMIT 6
         """), {"c": cid}).scalars().all()
@@ -2245,7 +2245,7 @@ def _glossary_for(slug: str) -> tuple:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         rows = session.execute(text(f"""
-            SELECT term, aliases FROM {S}.glossary_term
+            SELECT term, aliases FROM {S}.askcontent_glossary_term
             WHERE connector_id = :c
               AND (status = 'confirmed' OR source = 'human')
             ORDER BY length(term) DESC
@@ -2271,8 +2271,8 @@ def _rules_for_role(slug: str, role: str | None) -> tuple:
         cid = _connector_id(session, slug)
         rows = session.execute(text(f"""
             SELECT lr.effect, lr.space, lr.label
-            FROM {S}.rbac_label_rule lr
-            JOIN {S}.rbac_role r ON r.id = lr.role_id
+            FROM {S}.askcontent_rbac_label_rule lr
+            JOIN {S}.askcontent_rbac_role r ON r.id = lr.role_id
             WHERE r.connector_id = :c AND r.name = :n
         """), {"c": cid, "n": role}).mappings().all()
     return tuple(
@@ -2790,7 +2790,7 @@ async def upload_file(slug: str, request: Request):
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         existing = session.execute(text(
-            f"SELECT id, filename FROM {S}.upload WHERE org_id = :o AND file_hash = :h"
+            f"SELECT id, filename FROM {S}.askcontent_upload WHERE org_id = :o AND file_hash = :h"
         ), {"o": _org(session), "h": fhash}).mappings().one_or_none()
         if existing:
             # The same bytes, already here. Silently creating a second row would
@@ -2804,7 +2804,7 @@ async def upload_file(slug: str, request: Request):
 
         status = "pending" if (duplicates and not reason) else "accepted"
         uid = session.execute(text(f"""
-            INSERT INTO {S}.upload (org_id, collection_id, filename, mime, size_bytes,
+            INSERT INTO {S}.askcontent_upload (org_id, collection_id, filename, mime, size_bytes,
                 file_hash, text_hash, parser_id, parser_version, parse_path,
                 parse_quality, refusal_reason, title, blob, accepted_reason,
                 accepted_by, duplicate_of, status)
@@ -2825,7 +2825,7 @@ async def upload_file(slug: str, request: Request):
 
         if status == "accepted":
             session.execute(text(f"""
-                INSERT INTO {S}.collection_member
+                INSERT INTO {S}.askcontent_collection_member
                     (org_id, collection_id, doc_id, title, state, resolved_via)
                 VALUES (:o, :c, :d, :t, 'member', 'upload')
                 ON CONFLICT (collection_id, doc_id) DO NOTHING
@@ -2926,7 +2926,7 @@ def list_uploads(slug: str) -> list[dict]:
         rows = session.execute(text(f"""
             SELECT id, filename, mime, size_bytes, title, parse_path, refusal_reason,
                    accepted_reason, duplicate_of, status, created_at
-            FROM {S}.upload WHERE collection_id = :c ORDER BY created_at DESC
+            FROM {S}.askcontent_upload WHERE collection_id = :c ORDER BY created_at DESC
         """), {"c": collection["id"]}).mappings().all()
         return [dict(r) | {"id": str(r["id"])} for r in rows]
 
@@ -2949,7 +2949,7 @@ def accept_upload(slug: str, upload_id: str, body: UploadDecision) -> dict:
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         row = session.execute(text(f"""
-            UPDATE {S}.upload SET status = 'accepted', accepted_reason = :r,
+            UPDATE {S}.askcontent_upload SET status = 'accepted', accepted_reason = :r,
                    accepted_by = :a, updated_at = now()
             WHERE id = :u AND collection_id = :c RETURNING title
         """), {"r": body.reason, "a": body.actor, "u": upload_id,
@@ -2957,7 +2957,7 @@ def accept_upload(slug: str, upload_id: str, body: UploadDecision) -> dict:
         if row is None:
             raise HTTPException(404, "unknown upload")
         session.execute(text(f"""
-            INSERT INTO {S}.collection_member
+            INSERT INTO {S}.askcontent_collection_member
                 (org_id, collection_id, doc_id, title, state, resolved_via)
             VALUES (:o, :c, :d, :t, 'member', 'upload')
             ON CONFLICT (collection_id, doc_id) DO NOTHING
@@ -2972,10 +2972,10 @@ def delete_upload(slug: str, upload_id: str) -> dict:
     with _sessions()() as session:
         collection = _collection_row(session, slug)
         session.execute(text(
-            f"DELETE FROM {S}.upload WHERE id = :u AND collection_id = :c"
+            f"DELETE FROM {S}.askcontent_upload WHERE id = :u AND collection_id = :c"
         ), {"u": upload_id, "c": collection["id"]})
         session.execute(text(
-            f"DELETE FROM {S}.collection_member WHERE collection_id = :c AND doc_id = :d"
+            f"DELETE FROM {S}.askcontent_collection_member WHERE collection_id = :c AND doc_id = :d"
         ), {"c": collection["id"], "d": f"upload:{upload_id}"})
         session.commit()
     return {"deleted": upload_id}
@@ -3022,9 +3022,9 @@ def _thread_row(session, thread_id: str):
         SELECT CAST(t.id AS text) AS id, t.title, t.role, t.archived_at,
                t.created_at, t.updated_at, t.research,
                c.slug AS connector_id,
-               (SELECT count(*) FROM {S}.chat_turn x WHERE x.thread_id = t.id) AS turns
-        FROM {S}.chat_thread t
-        LEFT JOIN {S}.connector c ON c.id = t.connector_id
+               (SELECT count(*) FROM {S}.askcontent_chat_turn x WHERE x.thread_id = t.id) AS turns
+        FROM {S}.askcontent_chat_thread t
+        LEFT JOIN {S}.askcontent_connector c ON c.id = t.connector_id
         WHERE t.id = CAST(:id AS uuid) AND t.org_id = :o
     """), {"id": thread_id, "o": _org(session)}).mappings().one_or_none()
     if row is None:
@@ -3038,11 +3038,11 @@ def create_thread(body: ThreadCreate) -> dict:
         connector_id = None
         if body.connector_id:
             connector_id = session.execute(text(
-                f"SELECT id FROM {S}.connector WHERE org_id = :o AND slug = :s"
+                f"SELECT id FROM {S}.askcontent_connector WHERE org_id = :o AND slug = :s"
             ), {"o": _org(session), "s": body.connector_id}).scalar_one_or_none()
 
         thread_id = session.execute(text(f"""
-            INSERT INTO {S}.chat_thread (org_id, connector_id, title, role)
+            INSERT INTO {S}.askcontent_chat_thread (org_id, connector_id, title, role)
             VALUES (:o, :c, :t, :r) RETURNING CAST(id AS text)
         """), {
             "o": _org(session), "c": connector_id,
@@ -3062,9 +3062,9 @@ def list_threads(connector_id: str | None = None, limit: int = 100) -> list[dict
             SELECT CAST(t.id AS text) AS id, t.title, t.role,
                    t.created_at, t.updated_at, t.research,
                    c.slug AS connector_id,
-                   (SELECT count(*) FROM {S}.chat_turn x WHERE x.thread_id = t.id) AS turns
-            FROM {S}.chat_thread t
-            LEFT JOIN {S}.connector c ON c.id = t.connector_id
+                   (SELECT count(*) FROM {S}.askcontent_chat_turn x WHERE x.thread_id = t.id) AS turns
+            FROM {S}.askcontent_chat_thread t
+            LEFT JOIN {S}.askcontent_connector c ON c.id = t.connector_id
             WHERE t.org_id = :o AND t.archived_at IS NULL
               AND (CAST(:conn AS text) IS NULL OR c.slug = CAST(:conn AS text))
             ORDER BY t.updated_at DESC
@@ -3081,7 +3081,7 @@ def get_thread(thread_id: str) -> dict:
             SELECT CAST(id AS text) AS id, ordinal, question, answer, evidence,
                    steps, grounded, unsupported_reason, answered_by,
                    elapsed_ms, error, created_at
-            FROM {S}.chat_turn
+            FROM {S}.askcontent_chat_turn
             WHERE thread_id = CAST(:id AS uuid) AND org_id = :o
             ORDER BY ordinal
         """), {"id": thread_id, "o": _org(session)}).mappings().all()
@@ -3093,7 +3093,7 @@ def update_thread(thread_id: str, body: ThreadPatch) -> dict:
     with _sessions()() as session:
         _thread_row(session, thread_id)
         session.execute(text(f"""
-            UPDATE {S}.chat_thread SET
+            UPDATE {S}.askcontent_chat_thread SET
                 title = coalesce(:t, title),
                 role = coalesce(:r, role),
                 research = coalesce(CAST(:research AS jsonb), research),
@@ -3115,7 +3115,7 @@ def delete_thread(thread_id: str) -> None:
     with _sessions()() as session:
         _thread_row(session, thread_id)
         session.execute(text(
-            f"DELETE FROM {S}.chat_thread WHERE id = CAST(:id AS uuid) AND org_id = :o"
+            f"DELETE FROM {S}.askcontent_chat_thread WHERE id = CAST(:id AS uuid) AND org_id = :o"
         ), {"id": thread_id, "o": _org(session)})
         session.commit()
 
@@ -3126,8 +3126,8 @@ def delete_threads(connector_id: str | None = None) -> dict:
     on a screen showing one knowledgebase must not take the others with it."""
     with _sessions()() as session:
         deleted = session.execute(text(f"""
-            DELETE FROM {S}.chat_thread t
-            USING {S}.connector c
+            DELETE FROM {S}.askcontent_chat_thread t
+            USING {S}.askcontent_connector c
             WHERE t.org_id = :o
               AND (CAST(:conn AS text) IS NULL
                    OR (c.id = t.connector_id AND c.slug = CAST(:conn AS text)))
@@ -3157,14 +3157,14 @@ def append_turn(thread_id: str, body: TurnCreate) -> dict:
         # is worse than a slow write: the answer was given and the transcript
         # does not have it.
         turn_id = session.execute(text(f"""
-            INSERT INTO {S}.chat_turn
+            INSERT INTO {S}.askcontent_chat_turn
                 (org_id, thread_id, ordinal, question, answer, evidence, steps,
                  grounded, unsupported_reason, answered_by, elapsed_ms, error)
             SELECT :o, CAST(:t AS uuid),
                    coalesce(max(ordinal), 0) + 1,
                    :q, :a, CAST(:ev AS jsonb), CAST(:st AS jsonb), :g, :ur,
                    CAST(:ab AS jsonb), :ms, :err
-            FROM {S}.chat_turn WHERE thread_id = CAST(:t AS uuid)
+            FROM {S}.askcontent_chat_turn WHERE thread_id = CAST(:t AS uuid)
             RETURNING CAST(id AS text), ordinal
         """), {
             "o": org, "t": thread_id, "q": body.question,
@@ -3178,7 +3178,7 @@ def append_turn(thread_id: str, body: TurnCreate) -> dict:
         # The first question becomes the thread's name. People recognise a
         # conversation by what they asked, not by a date or an id.
         session.execute(text(f"""
-            UPDATE {S}.chat_thread
+            UPDATE {S}.askcontent_chat_thread
                SET updated_at = now(),
                    title = CASE WHEN title IS NULL OR title = ''
                                 THEN left(:q, 300) ELSE title END
@@ -3234,7 +3234,7 @@ def create_feedback(body: FeedbackCreate) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, body.connector_id)
         fid = session.execute(text(f"""
-            INSERT INTO {S}.answer_feedback
+            INSERT INTO {S}.askcontent_answer_feedback
                 (org_id, connector_id, thread_id, turn_id, question, answer,
                  citations, verdict, reason, comment, actor)
             VALUES (:o, :c, CAST(NULLIF(:th, '') AS uuid),
@@ -3264,7 +3264,7 @@ def list_feedback(slug: str, open_only: bool = True, limit: int = 50) -> dict:
             SELECT CAST(id AS text) AS id, question, answer, citations, verdict,
                    reason, comment, actor, created_at,
                    CAST(promoted_case_id AS text) AS promoted_case_id
-            FROM {S}.answer_feedback
+            FROM {S}.askcontent_answer_feedback
             WHERE connector_id = :c AND org_id = :o
               AND (NOT :open_only OR (verdict = 'unhelpful' AND promoted_case_id IS NULL))
             ORDER BY (verdict = 'unhelpful') DESC, created_at DESC
@@ -3272,7 +3272,7 @@ def list_feedback(slug: str, open_only: bool = True, limit: int = 50) -> dict:
         """), {"c": cid, "o": _org(session), "open_only": open_only, "n": limit}).mappings().all()
 
         counts = session.execute(text(f"""
-            SELECT verdict, count(*) AS n FROM {S}.answer_feedback
+            SELECT verdict, count(*) AS n FROM {S}.askcontent_answer_feedback
             WHERE connector_id = :c AND org_id = :o GROUP BY verdict
         """), {"c": cid, "o": _org(session)}).mappings().all()
 
@@ -3307,13 +3307,13 @@ def list_cases(slug: str) -> dict:
         cases = session.execute(text(f"""
             SELECT CAST(id AS text) AS id, question, expectations, note, origin,
                    enabled, role, created_at
-            FROM {S}.eval_case WHERE connector_id = :c AND org_id = :o
+            FROM {S}.askcontent_eval_case WHERE connector_id = :c AND org_id = :o
             ORDER BY created_at
         """), {"c": cid, "o": _org(session)}).mappings().all()
         runs = session.execute(text(f"""
             SELECT CAST(id AS text) AS id, started_at, finished_at, total,
                    passed, failed, context
-            FROM {S}.eval_run WHERE connector_id = :c AND org_id = :o
+            FROM {S}.askcontent_eval_run WHERE connector_id = :c AND org_id = :o
             ORDER BY started_at DESC LIMIT 10
         """), {"c": cid, "o": _org(session)}).mappings().all()
 
@@ -3323,7 +3323,7 @@ def list_cases(slug: str) -> dict:
                 dict(r) for r in session.execute(text(f"""
                     SELECT CAST(case_id AS text) AS case_id, question, passed,
                            failures, answer, cited, grounded, elapsed_ms
-                    FROM {S}.eval_result WHERE run_id = CAST(:r AS uuid)
+                    FROM {S}.askcontent_eval_result WHERE run_id = CAST(:r AS uuid)
                 """), {"r": runs[0]["id"]}).mappings().all()
             ]
 
@@ -3354,7 +3354,7 @@ def create_case(slug: str, body: CaseCreate) -> dict:
     with _sessions()() as session:
         cid = _connector_id(session, slug)
         case_id = session.execute(text(f"""
-            INSERT INTO {S}.eval_case
+            INSERT INTO {S}.askcontent_eval_case
                 (org_id, connector_id, question, expectations, note, origin, role)
             VALUES (:o, :c, :q, CAST(:e AS jsonb), :n, :orig, :role)
             RETURNING CAST(id AS text)
@@ -3368,7 +3368,7 @@ def create_case(slug: str, body: CaseCreate) -> dict:
         # become a test, not because somebody dismissed it.
         if body.from_feedback:
             session.execute(text(f"""
-                UPDATE {S}.answer_feedback SET promoted_case_id = CAST(:case AS uuid),
+                UPDATE {S}.askcontent_answer_feedback SET promoted_case_id = CAST(:case AS uuid),
                        updated_at = now()
                  WHERE id = CAST(:f AS uuid) AND org_id = :o
             """), {"case": case_id, "f": body.from_feedback, "o": _org(session)})
@@ -3380,7 +3380,7 @@ def create_case(slug: str, body: CaseCreate) -> dict:
 def delete_case(slug: str, case_id: str) -> dict:
     with _sessions()() as session:
         session.execute(text(
-            f"DELETE FROM {S}.eval_case WHERE id = CAST(:i AS uuid) AND org_id = :o"
+            f"DELETE FROM {S}.askcontent_eval_case WHERE id = CAST(:i AS uuid) AND org_id = :o"
         ), {"i": case_id, "o": _org(session)})
         session.commit()
     return {"deleted": case_id}

@@ -11,7 +11,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict m66fdwBQSMtWIwjFhW7O8OUrFqpr8WMnX9GWQhse3xt4QVqg2A0g83YXHsf02AB
+\restrict iP4Z16zN1ABAY3bYYZinhgMoTsr0Sntbxil1eJd0HPHigHAjBh2bBG6NIGIUS3H
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.7 (Homebrew)
@@ -51,10 +51,19 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
--- Name: answer_feedback; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_alembic_version; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.answer_feedback (
+CREATE TABLE askcontent.askcontent_alembic_version (
+    version_num character varying(32) NOT NULL
+);
+
+
+--
+-- Name: askcontent_answer_feedback; Type: TABLE; Schema: askcontent; Owner: -
+--
+
+CREATE TABLE askcontent.askcontent_answer_feedback (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     connector_id uuid,
@@ -72,14 +81,14 @@ CREATE TABLE askcontent.answer_feedback (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.answer_feedback FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_answer_feedback FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: app_user; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_app_user; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.app_user (
+CREATE TABLE askcontent.askcontent_app_user (
     email character varying(320) NOT NULL,
     display_name character varying(200),
     password_hash text,
@@ -91,19 +100,10 @@ CREATE TABLE askcontent.app_user (
 
 
 --
--- Name: askcontent_alembic_version; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_auth_session; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.askcontent_alembic_version (
-    version_num character varying(32) NOT NULL
-);
-
-
---
--- Name: auth_session; Type: TABLE; Schema: askcontent; Owner: -
---
-
-CREATE TABLE askcontent.auth_session (
+CREATE TABLE askcontent.askcontent_auth_session (
     token_hash character varying(128) NOT NULL,
     user_id uuid NOT NULL,
     org_id uuid,
@@ -116,10 +116,10 @@ CREATE TABLE askcontent.auth_session (
 
 
 --
--- Name: authority_rule; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_authority_rule; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.authority_rule (
+CREATE TABLE askcontent.askcontent_authority_rule (
     connector_id uuid NOT NULL,
     ordinal integer DEFAULT 0 NOT NULL,
     space character varying(200),
@@ -132,14 +132,14 @@ CREATE TABLE askcontent.authority_rule (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.authority_rule FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_authority_rule FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: chat_thread; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_thread; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.chat_thread (
+CREATE TABLE askcontent.askcontent_chat_thread (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     connector_id uuid,
@@ -148,17 +148,18 @@ CREATE TABLE askcontent.chat_thread (
     created_by character varying(200),
     archived_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    research jsonb
 );
 
-ALTER TABLE ONLY askcontent.chat_thread FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_chat_thread FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: chat_turn; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.chat_turn (
+CREATE TABLE askcontent.askcontent_chat_turn (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     thread_id uuid NOT NULL,
@@ -176,14 +177,14 @@ CREATE TABLE askcontent.chat_turn (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.chat_turn FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_chat_turn FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: collection; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_collection; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.collection (
+CREATE TABLE askcontent.askcontent_collection (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     slug character varying(64) NOT NULL,
@@ -198,14 +199,14 @@ CREATE TABLE askcontent.collection (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.collection FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_collection FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: collection_member; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.collection_member (
+CREATE TABLE askcontent.askcontent_collection_member (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     collection_id uuid NOT NULL,
@@ -241,14 +242,14 @@ CREATE TABLE askcontent.collection_member (
     last_similarity double precision
 );
 
-ALTER TABLE ONLY askcontent.collection_member FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_collection_member FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: collection_rule; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_rule; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.collection_rule (
+CREATE TABLE askcontent.askcontent_collection_rule (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     collection_id uuid NOT NULL,
@@ -264,14 +265,14 @@ CREATE TABLE askcontent.collection_rule (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.collection_rule FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_collection_rule FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: connector; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_connector; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.connector (
+CREATE TABLE askcontent.askcontent_connector (
     slug character varying(64) NOT NULL,
     name character varying(300) NOT NULL,
     workspace_id uuid NOT NULL,
@@ -295,17 +296,23 @@ CREATE TABLE askcontent.connector (
     collection_id uuid,
     description text DEFAULT ''::text NOT NULL,
     system_instructions text DEFAULT ''::text NOT NULL,
-    CONSTRAINT ck_connector_state CHECK (((state)::text = ANY ((ARRAY['draft'::character varying, 'active'::character varying, 'suspended'::character varying])::text[])))
+    context_source jsonb,
+    answer_model text,
+    answer_tone text DEFAULT ''::text NOT NULL,
+    reranker text,
+    rerank_model text,
+    research jsonb,
+    CONSTRAINT ck_askcontent_connector_state CHECK (((state)::text = ANY ((ARRAY['draft'::character varying, 'active'::character varying, 'suspended'::character varying])::text[])))
 );
 
-ALTER TABLE ONLY askcontent.connector FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_connector FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: document; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_document; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.document (
+CREATE TABLE askcontent.askcontent_document (
     connector_id uuid NOT NULL,
     doc_id character varying(300) NOT NULL,
     title text NOT NULL,
@@ -353,14 +360,14 @@ CREATE TABLE askcontent.document (
     last_cosmetic_change_at timestamp with time zone
 );
 
-ALTER TABLE ONLY askcontent.document FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_document FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: document_chunk; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.document_chunk (
+CREATE TABLE askcontent.askcontent_document_chunk (
     connector_id uuid NOT NULL,
     document_id uuid NOT NULL,
     chunk_id character varying(64) NOT NULL,
@@ -380,14 +387,14 @@ CREATE TABLE askcontent.document_chunk (
     overlap text DEFAULT ''::text NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.document_chunk FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_document_chunk FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: document_pin; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.document_pin (
+CREATE TABLE askcontent.askcontent_document_pin (
     connector_id uuid NOT NULL,
     doc_id character varying(300) NOT NULL,
     field character varying(32) NOT NULL,
@@ -400,14 +407,14 @@ CREATE TABLE askcontent.document_pin (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.document_pin FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_document_pin FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: embed; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_embed; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.embed (
+CREATE TABLE askcontent.askcontent_embed (
     connector_id uuid NOT NULL,
     name character varying(200) NOT NULL,
     publishable_key character varying(128) NOT NULL,
@@ -422,14 +429,14 @@ CREATE TABLE askcontent.embed (
     last_used_at timestamp with time zone
 );
 
-ALTER TABLE ONLY askcontent.embed FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_embed FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: embed_session; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_embed_session; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.embed_session (
+CREATE TABLE askcontent.askcontent_embed_session (
     embed_id uuid NOT NULL,
     visitor_id character varying(320) NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -439,14 +446,14 @@ CREATE TABLE askcontent.embed_session (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.embed_session FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_embed_session FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: embedding; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.embedding (
+CREATE TABLE askcontent.askcontent_embedding (
     connector_id uuid NOT NULL,
     kind character varying(24) NOT NULL,
     ref_id character varying(300) NOT NULL,
@@ -461,14 +468,14 @@ CREATE TABLE askcontent.embedding (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.embedding FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_embedding FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: eval_case; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_case; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.eval_case (
+CREATE TABLE askcontent.askcontent_eval_case (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     connector_id uuid NOT NULL,
@@ -482,14 +489,14 @@ CREATE TABLE askcontent.eval_case (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.eval_case FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_eval_case FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: eval_result; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.eval_result (
+CREATE TABLE askcontent.askcontent_eval_result (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     run_id uuid NOT NULL,
@@ -504,14 +511,14 @@ CREATE TABLE askcontent.eval_result (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.eval_result FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_eval_result FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: eval_run; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_run; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.eval_run (
+CREATE TABLE askcontent.askcontent_eval_run (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     connector_id uuid NOT NULL,
@@ -523,14 +530,14 @@ CREATE TABLE askcontent.eval_run (
     context jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.eval_run FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_eval_run FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: field_rule; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.field_rule (
+CREATE TABLE askcontent.askcontent_field_rule (
     connector_id uuid NOT NULL,
     target character varying(64) NOT NULL,
     source character varying(200),
@@ -545,14 +552,14 @@ CREATE TABLE askcontent.field_rule (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.field_rule FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_field_rule FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: glossary_term; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.glossary_term (
+CREATE TABLE askcontent.askcontent_glossary_term (
     connector_id uuid NOT NULL,
     term character varying(200) NOT NULL,
     definition text NOT NULL,
@@ -572,14 +579,14 @@ CREATE TABLE askcontent.glossary_term (
     reviewed_at timestamp with time zone
 );
 
-ALTER TABLE ONLY askcontent.glossary_term FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_glossary_term FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: job; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_job; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.job (
+CREATE TABLE askcontent.askcontent_job (
     connector_id uuid,
     kind character varying(32) NOT NULL,
     status character varying(16) DEFAULT 'queued'::character varying NOT NULL,
@@ -600,14 +607,14 @@ CREATE TABLE askcontent.job (
     collection_id uuid
 );
 
-ALTER TABLE ONLY askcontent.job FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_job FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: knowledgebase; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_knowledgebase; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.knowledgebase (
+CREATE TABLE askcontent.askcontent_knowledgebase (
     kb_id character varying(200) NOT NULL,
     name character varying(300) NOT NULL,
     description text,
@@ -623,14 +630,14 @@ CREATE TABLE askcontent.knowledgebase (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.knowledgebase FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_knowledgebase FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: membership; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_membership; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.membership (
+CREATE TABLE askcontent.askcontent_membership (
     user_id uuid NOT NULL,
     role character varying(32) DEFAULT 'member'::character varying NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -639,14 +646,14 @@ CREATE TABLE askcontent.membership (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.membership FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_membership FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: message; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_message; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.message (
+CREATE TABLE askcontent.askcontent_message (
     thread_id uuid NOT NULL,
     role character varying(16) NOT NULL,
     text text DEFAULT ''::text NOT NULL,
@@ -659,14 +666,34 @@ CREATE TABLE askcontent.message (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.message FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_message FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: org; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_model_catalog; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.org (
+CREATE TABLE askcontent.askcontent_model_catalog (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    kind text DEFAULT 'answer'::text NOT NULL,
+    vendor text NOT NULL,
+    model_id text NOT NULL,
+    name text NOT NULL,
+    note text DEFAULT ''::text NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    is_default boolean DEFAULT false NOT NULL,
+    ordinal integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: askcontent_org; Type: TABLE; Schema: askcontent; Owner: -
+--
+
+CREATE TABLE askcontent.askcontent_org (
     slug character varying(64) NOT NULL,
     name character varying(200) NOT NULL,
     status character varying(24) DEFAULT 'active'::character varying NOT NULL,
@@ -677,10 +704,10 @@ CREATE TABLE askcontent.org (
 
 
 --
--- Name: quarantine_item; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_quarantine_item; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.quarantine_item (
+CREATE TABLE askcontent.askcontent_quarantine_item (
     connector_id uuid NOT NULL,
     doc_id character varying(300) NOT NULL,
     matched_class character varying(64) NOT NULL,
@@ -693,14 +720,14 @@ CREATE TABLE askcontent.quarantine_item (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.quarantine_item FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_quarantine_item FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: rbac_label_rule; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_label_rule; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.rbac_label_rule (
+CREATE TABLE askcontent.askcontent_rbac_label_rule (
     role_id uuid NOT NULL,
     space character varying(200),
     label character varying(200),
@@ -711,14 +738,14 @@ CREATE TABLE askcontent.rbac_label_rule (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.rbac_label_rule FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_rbac_label_rule FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: rbac_policy_version; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_policy_version; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.rbac_policy_version (
+CREATE TABLE askcontent.askcontent_rbac_policy_version (
     connector_id uuid NOT NULL,
     version integer DEFAULT 1 NOT NULL,
     changed_by character varying(320),
@@ -728,14 +755,14 @@ CREATE TABLE askcontent.rbac_policy_version (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.rbac_policy_version FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_rbac_policy_version FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: rbac_role; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.rbac_role (
+CREATE TABLE askcontent.askcontent_rbac_role (
     connector_id uuid NOT NULL,
     name character varying(120) NOT NULL,
     description text,
@@ -745,14 +772,14 @@ CREATE TABLE askcontent.rbac_role (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.rbac_role FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_rbac_role FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: rbac_role_member; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role_member; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.rbac_role_member (
+CREATE TABLE askcontent.askcontent_rbac_role_member (
     role_id uuid NOT NULL,
     principal character varying(320) NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -761,14 +788,14 @@ CREATE TABLE askcontent.rbac_role_member (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.rbac_role_member FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_rbac_role_member FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: retrieval_plan; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_plan; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.retrieval_plan (
+CREATE TABLE askcontent.askcontent_retrieval_plan (
     connector_id uuid NOT NULL,
     question_hash character varying(64) NOT NULL,
     question text NOT NULL,
@@ -785,14 +812,14 @@ CREATE TABLE askcontent.retrieval_plan (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.retrieval_plan FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_retrieval_plan FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: retrieval_run; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_run; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.retrieval_run (
+CREATE TABLE askcontent.askcontent_retrieval_run (
     connector_id uuid NOT NULL,
     actor character varying(320) NOT NULL,
     question text NOT NULL,
@@ -813,14 +840,14 @@ CREATE TABLE askcontent.retrieval_run (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.retrieval_run FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_retrieval_run FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: scope_change; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_scope_change; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.scope_change (
+CREATE TABLE askcontent.askcontent_scope_change (
     connector_id uuid NOT NULL,
     actor character varying(320) NOT NULL,
     scope_before jsonb,
@@ -834,14 +861,14 @@ CREATE TABLE askcontent.scope_change (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.scope_change FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_scope_change FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: thread; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_thread; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.thread (
+CREATE TABLE askcontent.askcontent_thread (
     workspace_id uuid NOT NULL,
     connector_id uuid NOT NULL,
     user_id uuid,
@@ -852,14 +879,14 @@ CREATE TABLE askcontent.thread (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.thread FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_thread FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: upload; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_upload; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.upload (
+CREATE TABLE askcontent.askcontent_upload (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     collection_id uuid,
@@ -883,14 +910,14 @@ CREATE TABLE askcontent.upload (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.upload FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_upload FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: url_paste; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_url_paste; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.url_paste (
+CREATE TABLE askcontent.askcontent_url_paste (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     org_id uuid NOT NULL,
     collection_id uuid,
@@ -904,14 +931,14 @@ CREATE TABLE askcontent.url_paste (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.url_paste FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY askcontent.askcontent_url_paste FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: workspace; Type: TABLE; Schema: askcontent; Owner: -
+-- Name: askcontent_workspace; Type: TABLE; Schema: askcontent; Owner: -
 --
 
-CREATE TABLE askcontent.workspace (
+CREATE TABLE askcontent.askcontent_workspace (
     slug character varying(64) NOT NULL,
     name character varying(200) NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -920,15 +947,7 @@ CREATE TABLE askcontent.workspace (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY askcontent.workspace FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: answer_feedback answer_feedback_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
---
-
-ALTER TABLE ONLY askcontent.answer_feedback
-    ADD CONSTRAINT answer_feedback_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_workspace FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -940,1837 +959,1861 @@ ALTER TABLE ONLY askcontent.askcontent_alembic_version
 
 
 --
--- Name: chat_thread chat_thread_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback askcontent_answer_feedback_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_thread
-    ADD CONSTRAINT chat_thread_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_answer_feedback
+    ADD CONSTRAINT askcontent_answer_feedback_pkey PRIMARY KEY (id);
 
 
 --
--- Name: chat_turn chat_turn_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_thread askcontent_chat_thread_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_turn
-    ADD CONSTRAINT chat_turn_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_chat_thread
+    ADD CONSTRAINT askcontent_chat_thread_pkey PRIMARY KEY (id);
 
 
 --
--- Name: chat_turn chat_turn_thread_id_ordinal_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn askcontent_chat_turn_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_turn
-    ADD CONSTRAINT chat_turn_thread_id_ordinal_key UNIQUE (thread_id, ordinal);
+ALTER TABLE ONLY askcontent.askcontent_chat_turn
+    ADD CONSTRAINT askcontent_chat_turn_pkey PRIMARY KEY (id);
 
 
 --
--- Name: collection_member collection_member_collection_id_doc_id_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn askcontent_chat_turn_thread_id_ordinal_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_member
-    ADD CONSTRAINT collection_member_collection_id_doc_id_key UNIQUE (collection_id, doc_id);
+ALTER TABLE ONLY askcontent.askcontent_chat_turn
+    ADD CONSTRAINT askcontent_chat_turn_thread_id_ordinal_key UNIQUE (thread_id, ordinal);
 
 
 --
--- Name: collection_member collection_member_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member askcontent_collection_member_collection_id_doc_id_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_member
-    ADD CONSTRAINT collection_member_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_collection_member
+    ADD CONSTRAINT askcontent_collection_member_collection_id_doc_id_key UNIQUE (collection_id, doc_id);
 
 
 --
--- Name: collection collection_org_id_slug_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member askcontent_collection_member_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection
-    ADD CONSTRAINT collection_org_id_slug_key UNIQUE (org_id, slug);
+ALTER TABLE ONLY askcontent.askcontent_collection_member
+    ADD CONSTRAINT askcontent_collection_member_pkey PRIMARY KEY (id);
 
 
 --
--- Name: collection collection_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection askcontent_collection_org_id_slug_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection
-    ADD CONSTRAINT collection_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_collection
+    ADD CONSTRAINT askcontent_collection_org_id_slug_key UNIQUE (org_id, slug);
 
 
 --
--- Name: collection_rule collection_rule_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection askcontent_collection_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_rule
-    ADD CONSTRAINT collection_rule_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_collection
+    ADD CONSTRAINT askcontent_collection_pkey PRIMARY KEY (id);
 
 
 --
--- Name: eval_case eval_case_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_rule askcontent_collection_rule_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_case
-    ADD CONSTRAINT eval_case_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_collection_rule
+    ADD CONSTRAINT askcontent_collection_rule_pkey PRIMARY KEY (id);
 
 
 --
--- Name: eval_result eval_result_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_case askcontent_eval_case_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_result
-    ADD CONSTRAINT eval_result_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_eval_case
+    ADD CONSTRAINT askcontent_eval_case_pkey PRIMARY KEY (id);
 
 
 --
--- Name: eval_run eval_run_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result askcontent_eval_result_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_run
-    ADD CONSTRAINT eval_run_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_eval_result
+    ADD CONSTRAINT askcontent_eval_result_pkey PRIMARY KEY (id);
 
 
 --
--- Name: app_user pk_app_user; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_run askcontent_eval_run_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.app_user
-    ADD CONSTRAINT pk_app_user PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_eval_run
+    ADD CONSTRAINT askcontent_eval_run_pkey PRIMARY KEY (id);
 
 
 --
--- Name: auth_session pk_auth_session; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_model_catalog askcontent_model_catalog_org_id_kind_vendor_model_id_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.auth_session
-    ADD CONSTRAINT pk_auth_session PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_model_catalog
+    ADD CONSTRAINT askcontent_model_catalog_org_id_kind_vendor_model_id_key UNIQUE (org_id, kind, vendor, model_id);
 
 
 --
--- Name: authority_rule pk_authority_rule; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_model_catalog askcontent_model_catalog_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.authority_rule
-    ADD CONSTRAINT pk_authority_rule PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_model_catalog
+    ADD CONSTRAINT askcontent_model_catalog_pkey PRIMARY KEY (id);
 
 
 --
--- Name: connector pk_connector; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_upload askcontent_upload_org_id_file_hash_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.connector
-    ADD CONSTRAINT pk_connector PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_upload
+    ADD CONSTRAINT askcontent_upload_org_id_file_hash_key UNIQUE (org_id, file_hash);
 
 
 --
--- Name: document pk_document; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_upload askcontent_upload_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document
-    ADD CONSTRAINT pk_document PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_upload
+    ADD CONSTRAINT askcontent_upload_pkey PRIMARY KEY (id);
 
 
 --
--- Name: document_chunk pk_document_chunk; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_url_paste askcontent_url_paste_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_chunk
-    ADD CONSTRAINT pk_document_chunk PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_url_paste
+    ADD CONSTRAINT askcontent_url_paste_pkey PRIMARY KEY (id);
 
 
 --
--- Name: document_pin pk_document_pin; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_app_user pk_askcontent_app_user; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_pin
-    ADD CONSTRAINT pk_document_pin PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_app_user
+    ADD CONSTRAINT pk_askcontent_app_user PRIMARY KEY (id);
 
 
 --
--- Name: embed pk_embed; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_auth_session pk_askcontent_auth_session; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed
-    ADD CONSTRAINT pk_embed PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_auth_session
+    ADD CONSTRAINT pk_askcontent_auth_session PRIMARY KEY (id);
 
 
 --
--- Name: embed_session pk_embed_session; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_authority_rule pk_askcontent_authority_rule; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed_session
-    ADD CONSTRAINT pk_embed_session PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_authority_rule
+    ADD CONSTRAINT pk_askcontent_authority_rule PRIMARY KEY (id);
 
 
 --
--- Name: embedding pk_embedding; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_connector pk_askcontent_connector; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embedding
-    ADD CONSTRAINT pk_embedding PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_connector
+    ADD CONSTRAINT pk_askcontent_connector PRIMARY KEY (id);
 
 
 --
--- Name: field_rule pk_field_rule; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document pk_askcontent_document; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.field_rule
-    ADD CONSTRAINT pk_field_rule PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_document
+    ADD CONSTRAINT pk_askcontent_document PRIMARY KEY (id);
 
 
 --
--- Name: glossary_term pk_glossary_term; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk pk_askcontent_document_chunk; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.glossary_term
-    ADD CONSTRAINT pk_glossary_term PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_document_chunk
+    ADD CONSTRAINT pk_askcontent_document_chunk PRIMARY KEY (id);
 
 
 --
--- Name: job pk_job; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin pk_askcontent_document_pin; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.job
-    ADD CONSTRAINT pk_job PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_document_pin
+    ADD CONSTRAINT pk_askcontent_document_pin PRIMARY KEY (id);
 
 
 --
--- Name: knowledgebase pk_knowledgebase; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed pk_askcontent_embed; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.knowledgebase
-    ADD CONSTRAINT pk_knowledgebase PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_embed
+    ADD CONSTRAINT pk_askcontent_embed PRIMARY KEY (id);
 
 
 --
--- Name: membership pk_membership; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed_session pk_askcontent_embed_session; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.membership
-    ADD CONSTRAINT pk_membership PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_embed_session
+    ADD CONSTRAINT pk_askcontent_embed_session PRIMARY KEY (id);
 
 
 --
--- Name: message pk_message; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding pk_askcontent_embedding; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.message
-    ADD CONSTRAINT pk_message PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_embedding
+    ADD CONSTRAINT pk_askcontent_embedding PRIMARY KEY (id);
 
 
 --
--- Name: org pk_org; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule pk_askcontent_field_rule; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.org
-    ADD CONSTRAINT pk_org PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_field_rule
+    ADD CONSTRAINT pk_askcontent_field_rule PRIMARY KEY (id);
 
 
 --
--- Name: quarantine_item pk_quarantine_item; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term pk_askcontent_glossary_term; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.quarantine_item
-    ADD CONSTRAINT pk_quarantine_item PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_glossary_term
+    ADD CONSTRAINT pk_askcontent_glossary_term PRIMARY KEY (id);
 
 
 --
--- Name: rbac_label_rule pk_rbac_label_rule; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_job pk_askcontent_job; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_label_rule
-    ADD CONSTRAINT pk_rbac_label_rule PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_job
+    ADD CONSTRAINT pk_askcontent_job PRIMARY KEY (id);
 
 
 --
--- Name: rbac_policy_version pk_rbac_policy_version; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_knowledgebase pk_askcontent_knowledgebase; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_policy_version
-    ADD CONSTRAINT pk_rbac_policy_version PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_knowledgebase
+    ADD CONSTRAINT pk_askcontent_knowledgebase PRIMARY KEY (id);
 
 
 --
--- Name: rbac_role pk_rbac_role; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_membership pk_askcontent_membership; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role
-    ADD CONSTRAINT pk_rbac_role PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_membership
+    ADD CONSTRAINT pk_askcontent_membership PRIMARY KEY (id);
 
 
 --
--- Name: rbac_role_member pk_rbac_role_member; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_message pk_askcontent_message; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role_member
-    ADD CONSTRAINT pk_rbac_role_member PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_message
+    ADD CONSTRAINT pk_askcontent_message PRIMARY KEY (id);
 
 
 --
--- Name: retrieval_plan pk_retrieval_plan; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_org pk_askcontent_org; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.retrieval_plan
-    ADD CONSTRAINT pk_retrieval_plan PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_org
+    ADD CONSTRAINT pk_askcontent_org PRIMARY KEY (id);
 
 
 --
--- Name: retrieval_run pk_retrieval_run; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_quarantine_item pk_askcontent_quarantine_item; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.retrieval_run
-    ADD CONSTRAINT pk_retrieval_run PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_quarantine_item
+    ADD CONSTRAINT pk_askcontent_quarantine_item PRIMARY KEY (id);
 
 
 --
--- Name: scope_change pk_scope_change; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_label_rule pk_askcontent_rbac_label_rule; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.scope_change
-    ADD CONSTRAINT pk_scope_change PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_rbac_label_rule
+    ADD CONSTRAINT pk_askcontent_rbac_label_rule PRIMARY KEY (id);
 
 
 --
--- Name: thread pk_thread; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_policy_version pk_askcontent_rbac_policy_version; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.thread
-    ADD CONSTRAINT pk_thread PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_rbac_policy_version
+    ADD CONSTRAINT pk_askcontent_rbac_policy_version PRIMARY KEY (id);
 
 
 --
--- Name: workspace pk_workspace; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role pk_askcontent_rbac_role; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.workspace
-    ADD CONSTRAINT pk_workspace PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_rbac_role
+    ADD CONSTRAINT pk_askcontent_rbac_role PRIMARY KEY (id);
 
 
 --
--- Name: upload upload_org_id_file_hash_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role_member pk_askcontent_rbac_role_member; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.upload
-    ADD CONSTRAINT upload_org_id_file_hash_key UNIQUE (org_id, file_hash);
+ALTER TABLE ONLY askcontent.askcontent_rbac_role_member
+    ADD CONSTRAINT pk_askcontent_rbac_role_member PRIMARY KEY (id);
 
 
 --
--- Name: upload upload_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_plan pk_askcontent_retrieval_plan; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.upload
-    ADD CONSTRAINT upload_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_retrieval_plan
+    ADD CONSTRAINT pk_askcontent_retrieval_plan PRIMARY KEY (id);
 
 
 --
--- Name: app_user uq_app_user_email; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_run pk_askcontent_retrieval_run; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.app_user
-    ADD CONSTRAINT uq_app_user_email UNIQUE (email);
+ALTER TABLE ONLY askcontent.askcontent_retrieval_run
+    ADD CONSTRAINT pk_askcontent_retrieval_run PRIMARY KEY (id);
 
 
 --
--- Name: auth_session uq_auth_session_token_hash; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_scope_change pk_askcontent_scope_change; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.auth_session
-    ADD CONSTRAINT uq_auth_session_token_hash UNIQUE (token_hash);
+ALTER TABLE ONLY askcontent.askcontent_scope_change
+    ADD CONSTRAINT pk_askcontent_scope_change PRIMARY KEY (id);
 
 
 --
--- Name: connector uq_connector_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_thread pk_askcontent_thread; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.connector
-    ADD CONSTRAINT uq_connector_org_id UNIQUE (org_id, slug);
+ALTER TABLE ONLY askcontent.askcontent_thread
+    ADD CONSTRAINT pk_askcontent_thread PRIMARY KEY (id);
 
 
 --
--- Name: document_chunk uq_document_chunk_document_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_workspace pk_askcontent_workspace; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_chunk
-    ADD CONSTRAINT uq_document_chunk_document_id UNIQUE (document_id, ordinal);
+ALTER TABLE ONLY askcontent.askcontent_workspace
+    ADD CONSTRAINT pk_askcontent_workspace PRIMARY KEY (id);
 
 
 --
--- Name: document uq_document_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_app_user uq_askcontent_app_user_email; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document
-    ADD CONSTRAINT uq_document_connector_id UNIQUE (connector_id, doc_id);
+ALTER TABLE ONLY askcontent.askcontent_app_user
+    ADD CONSTRAINT uq_askcontent_app_user_email UNIQUE (email);
 
 
 --
--- Name: document_pin uq_document_pin_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_auth_session uq_askcontent_auth_session_token_hash; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_pin
-    ADD CONSTRAINT uq_document_pin_connector_id UNIQUE (connector_id, doc_id, field);
+ALTER TABLE ONLY askcontent.askcontent_auth_session
+    ADD CONSTRAINT uq_askcontent_auth_session_token_hash UNIQUE (token_hash);
 
 
 --
--- Name: embed uq_embed_publishable_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_connector uq_askcontent_connector_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed
-    ADD CONSTRAINT uq_embed_publishable_key UNIQUE (publishable_key);
+ALTER TABLE ONLY askcontent.askcontent_connector
+    ADD CONSTRAINT uq_askcontent_connector_org_id UNIQUE (org_id, slug);
 
 
 --
--- Name: embedding uq_embedding_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk uq_askcontent_document_chunk_document_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embedding
-    ADD CONSTRAINT uq_embedding_connector_id UNIQUE (connector_id, kind, ref_id, model_id);
+ALTER TABLE ONLY askcontent.askcontent_document_chunk
+    ADD CONSTRAINT uq_askcontent_document_chunk_document_id UNIQUE (document_id, ordinal);
 
 
 --
--- Name: field_rule uq_field_rule_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document uq_askcontent_document_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.field_rule
-    ADD CONSTRAINT uq_field_rule_connector_id UNIQUE (connector_id, target);
+ALTER TABLE ONLY askcontent.askcontent_document
+    ADD CONSTRAINT uq_askcontent_document_connector_id UNIQUE (connector_id, doc_id);
 
 
 --
--- Name: glossary_term uq_glossary_term_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin uq_askcontent_document_pin_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.glossary_term
-    ADD CONSTRAINT uq_glossary_term_connector_id UNIQUE (connector_id, term);
+ALTER TABLE ONLY askcontent.askcontent_document_pin
+    ADD CONSTRAINT uq_askcontent_document_pin_connector_id UNIQUE (connector_id, doc_id, field);
 
 
 --
--- Name: knowledgebase uq_knowledgebase_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed uq_askcontent_embed_publishable_key; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.knowledgebase
-    ADD CONSTRAINT uq_knowledgebase_org_id UNIQUE (org_id, kb_id);
+ALTER TABLE ONLY askcontent.askcontent_embed
+    ADD CONSTRAINT uq_askcontent_embed_publishable_key UNIQUE (publishable_key);
 
 
 --
--- Name: membership uq_membership_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding uq_askcontent_embedding_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.membership
-    ADD CONSTRAINT uq_membership_org_id UNIQUE (org_id, user_id);
+ALTER TABLE ONLY askcontent.askcontent_embedding
+    ADD CONSTRAINT uq_askcontent_embedding_connector_id UNIQUE (connector_id, kind, ref_id, model_id);
 
 
 --
--- Name: org uq_org_slug; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule uq_askcontent_field_rule_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.org
-    ADD CONSTRAINT uq_org_slug UNIQUE (slug);
+ALTER TABLE ONLY askcontent.askcontent_field_rule
+    ADD CONSTRAINT uq_askcontent_field_rule_connector_id UNIQUE (connector_id, target);
 
 
 --
--- Name: rbac_role uq_rbac_role_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term uq_askcontent_glossary_term_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role
-    ADD CONSTRAINT uq_rbac_role_connector_id UNIQUE (connector_id, name);
+ALTER TABLE ONLY askcontent.askcontent_glossary_term
+    ADD CONSTRAINT uq_askcontent_glossary_term_connector_id UNIQUE (connector_id, term);
 
 
 --
--- Name: rbac_role_member uq_rbac_role_member_role_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_knowledgebase uq_askcontent_knowledgebase_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role_member
-    ADD CONSTRAINT uq_rbac_role_member_role_id UNIQUE (role_id, principal);
+ALTER TABLE ONLY askcontent.askcontent_knowledgebase
+    ADD CONSTRAINT uq_askcontent_knowledgebase_org_id UNIQUE (org_id, kb_id);
 
 
 --
--- Name: retrieval_plan uq_retrieval_plan_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_membership uq_askcontent_membership_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.retrieval_plan
-    ADD CONSTRAINT uq_retrieval_plan_connector_id UNIQUE (connector_id, question_hash, catalog_version, reranker_id);
+ALTER TABLE ONLY askcontent.askcontent_membership
+    ADD CONSTRAINT uq_askcontent_membership_org_id UNIQUE (org_id, user_id);
 
 
 --
--- Name: workspace uq_workspace_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_org uq_askcontent_org_slug; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.workspace
-    ADD CONSTRAINT uq_workspace_org_id UNIQUE (org_id, slug);
+ALTER TABLE ONLY askcontent.askcontent_org
+    ADD CONSTRAINT uq_askcontent_org_slug UNIQUE (slug);
 
 
 --
--- Name: url_paste url_paste_pkey; Type: CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role uq_askcontent_rbac_role_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.url_paste
-    ADD CONSTRAINT url_paste_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY askcontent.askcontent_rbac_role
+    ADD CONSTRAINT uq_askcontent_rbac_role_connector_id UNIQUE (connector_id, name);
+
+
+--
+-- Name: askcontent_rbac_role_member uq_askcontent_rbac_role_member_role_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+--
+
+ALTER TABLE ONLY askcontent.askcontent_rbac_role_member
+    ADD CONSTRAINT uq_askcontent_rbac_role_member_role_id UNIQUE (role_id, principal);
+
+
+--
+-- Name: askcontent_retrieval_plan uq_askcontent_retrieval_plan_connector_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+--
+
+ALTER TABLE ONLY askcontent.askcontent_retrieval_plan
+    ADD CONSTRAINT uq_askcontent_retrieval_plan_connector_id UNIQUE (connector_id, question_hash, catalog_version, reranker_id);
+
+
+--
+-- Name: askcontent_workspace uq_askcontent_workspace_org_id; Type: CONSTRAINT; Schema: askcontent; Owner: -
+--
+
+ALTER TABLE ONLY askcontent.askcontent_workspace
+    ADD CONSTRAINT uq_askcontent_workspace_org_id UNIQUE (org_id, slug);
 
 
 --
 -- Name: ix_askcontent_authority_rule_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_authority_rule_org_id ON askcontent.authority_rule USING btree (org_id);
+CREATE INDEX ix_askcontent_authority_rule_org_id ON askcontent.askcontent_authority_rule USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_chat_thread_recent; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_chat_thread_recent ON askcontent.askcontent_chat_thread USING btree (org_id, updated_at DESC) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: ix_askcontent_chunk_chunk_id; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_chunk_chunk_id ON askcontent.askcontent_document_chunk USING btree (connector_id, chunk_id);
+
+
+--
+-- Name: ix_askcontent_chunk_fts; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_chunk_fts ON askcontent.askcontent_document_chunk USING gin (to_tsvector('english'::regconfig, text));
 
 
 --
 -- Name: ix_askcontent_connector_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_connector_org_id ON askcontent.connector USING btree (org_id);
+CREATE INDEX ix_askcontent_connector_org_id ON askcontent.askcontent_connector USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_document_chunk_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_document_chunk_org_id ON askcontent.document_chunk USING btree (org_id);
+CREATE INDEX ix_askcontent_document_chunk_org_id ON askcontent.askcontent_document_chunk USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_document_fts; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_document_fts ON askcontent.askcontent_document USING gin (to_tsvector('english'::regconfig, ((COALESCE(title, ''::text) || ' '::text) || COALESCE(path, ''::text))));
 
 
 --
 -- Name: ix_askcontent_document_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_document_org_id ON askcontent.document USING btree (org_id);
+CREATE INDEX ix_askcontent_document_org_id ON askcontent.askcontent_document USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_document_pin_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_document_pin_org_id ON askcontent.document_pin USING btree (org_id);
+CREATE INDEX ix_askcontent_document_pin_org_id ON askcontent.askcontent_document_pin USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_document_scope; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_document_scope ON askcontent.askcontent_document USING btree (connector_id, in_scope);
+
+
+--
+-- Name: ix_askcontent_document_space; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_document_space ON askcontent.askcontent_document USING btree (connector_id, space);
+
+
+--
+-- Name: ix_askcontent_document_updated; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_document_updated ON askcontent.askcontent_document USING btree (connector_id, source_updated_at);
 
 
 --
 -- Name: ix_askcontent_embed_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_embed_org_id ON askcontent.embed USING btree (org_id);
+CREATE INDEX ix_askcontent_embed_org_id ON askcontent.askcontent_embed USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_embed_session_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_embed_session_org_id ON askcontent.embed_session USING btree (org_id);
+CREATE INDEX ix_askcontent_embed_session_org_id ON askcontent.askcontent_embed_session USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_embedding_lookup; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_embedding_lookup ON askcontent.askcontent_embedding USING btree (connector_id, kind);
 
 
 --
 -- Name: ix_askcontent_embedding_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_embedding_org_id ON askcontent.embedding USING btree (org_id);
+CREATE INDEX ix_askcontent_embedding_org_id ON askcontent.askcontent_embedding USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_embedding_vector_cosine; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_embedding_vector_cosine ON askcontent.askcontent_embedding USING hnsw (vector extensions.vector_cosine_ops) WITH (m='16', ef_construction='64');
+
+
+--
+-- Name: ix_askcontent_eval_result_run; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_eval_result_run ON askcontent.askcontent_eval_result USING btree (run_id);
+
+
+--
+-- Name: ix_askcontent_feedback_open; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_feedback_open ON askcontent.askcontent_answer_feedback USING btree (connector_id, created_at DESC) WHERE (((verdict)::text = 'unhelpful'::text) AND (promoted_case_id IS NULL));
 
 
 --
 -- Name: ix_askcontent_field_rule_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_field_rule_org_id ON askcontent.field_rule USING btree (org_id);
+CREATE INDEX ix_askcontent_field_rule_org_id ON askcontent.askcontent_field_rule USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_glossary_status; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_glossary_status ON askcontent.askcontent_glossary_term USING btree (connector_id, status);
 
 
 --
 -- Name: ix_askcontent_glossary_term_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_glossary_term_org_id ON askcontent.glossary_term USING btree (org_id);
+CREATE INDEX ix_askcontent_glossary_term_org_id ON askcontent.askcontent_glossary_term USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_job_claimable; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_job_claimable ON askcontent.askcontent_job USING btree (status, run_after) WHERE ((status)::text = ANY ((ARRAY['queued'::character varying, 'retry'::character varying])::text[]));
 
 
 --
 -- Name: ix_askcontent_job_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_job_org_id ON askcontent.job USING btree (org_id);
+CREATE INDEX ix_askcontent_job_org_id ON askcontent.askcontent_job USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_job_queue; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_job_queue ON askcontent.askcontent_job USING btree (status, created_at);
 
 
 --
 -- Name: ix_askcontent_knowledgebase_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_knowledgebase_org_id ON askcontent.knowledgebase USING btree (org_id);
+CREATE INDEX ix_askcontent_knowledgebase_org_id ON askcontent.askcontent_knowledgebase USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_member_checked; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_member_checked ON askcontent.askcontent_collection_member USING btree (collection_id, last_checked_at NULLS FIRST);
+
+
+--
+-- Name: ix_askcontent_member_state; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_member_state ON askcontent.askcontent_collection_member USING btree (collection_id, state);
 
 
 --
 -- Name: ix_askcontent_membership_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_membership_org_id ON askcontent.membership USING btree (org_id);
+CREATE INDEX ix_askcontent_membership_org_id ON askcontent.askcontent_membership USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_message_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_message_org_id ON askcontent.message USING btree (org_id);
+CREATE INDEX ix_askcontent_message_org_id ON askcontent.askcontent_message USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_message_thread; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_message_thread ON askcontent.askcontent_message USING btree (thread_id, created_at);
 
 
 --
 -- Name: ix_askcontent_quarantine_item_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_quarantine_item_org_id ON askcontent.quarantine_item USING btree (org_id);
+CREATE INDEX ix_askcontent_quarantine_item_org_id ON askcontent.askcontent_quarantine_item USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_rbac_label_rule_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_rbac_label_rule_org_id ON askcontent.rbac_label_rule USING btree (org_id);
+CREATE INDEX ix_askcontent_rbac_label_rule_org_id ON askcontent.askcontent_rbac_label_rule USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_rbac_policy_version_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_rbac_policy_version_org_id ON askcontent.rbac_policy_version USING btree (org_id);
+CREATE INDEX ix_askcontent_rbac_policy_version_org_id ON askcontent.askcontent_rbac_policy_version USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_rbac_role_member_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_rbac_role_member_org_id ON askcontent.rbac_role_member USING btree (org_id);
+CREATE INDEX ix_askcontent_rbac_role_member_org_id ON askcontent.askcontent_rbac_role_member USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_rbac_role_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_rbac_role_org_id ON askcontent.rbac_role USING btree (org_id);
+CREATE INDEX ix_askcontent_rbac_role_org_id ON askcontent.askcontent_rbac_role USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_retrieval_plan_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_retrieval_plan_org_id ON askcontent.retrieval_plan USING btree (org_id);
+CREATE INDEX ix_askcontent_retrieval_plan_org_id ON askcontent.askcontent_retrieval_plan USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_retrieval_run_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_retrieval_run_org_id ON askcontent.retrieval_run USING btree (org_id);
+CREATE INDEX ix_askcontent_retrieval_run_org_id ON askcontent.askcontent_retrieval_run USING btree (org_id);
+
+
+--
+-- Name: ix_askcontent_run_connector_time; Type: INDEX; Schema: askcontent; Owner: -
+--
+
+CREATE INDEX ix_askcontent_run_connector_time ON askcontent.askcontent_retrieval_run USING btree (connector_id, created_at);
 
 
 --
 -- Name: ix_askcontent_scope_change_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_scope_change_org_id ON askcontent.scope_change USING btree (org_id);
+CREATE INDEX ix_askcontent_scope_change_org_id ON askcontent.askcontent_scope_change USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_thread_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_thread_org_id ON askcontent.thread USING btree (org_id);
+CREATE INDEX ix_askcontent_thread_org_id ON askcontent.askcontent_thread USING btree (org_id);
 
 
 --
 -- Name: ix_askcontent_workspace_org_id; Type: INDEX; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_askcontent_workspace_org_id ON askcontent.workspace USING btree (org_id);
+CREATE INDEX ix_askcontent_workspace_org_id ON askcontent.askcontent_workspace USING btree (org_id);
 
 
 --
--- Name: ix_chat_thread_recent; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback askcontent_answer_feedback_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_chat_thread_recent ON askcontent.chat_thread USING btree (org_id, updated_at DESC) WHERE (archived_at IS NULL);
+ALTER TABLE ONLY askcontent.askcontent_answer_feedback
+    ADD CONSTRAINT askcontent_answer_feedback_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE SET NULL;
 
 
 --
--- Name: ix_chunk_chunk_id; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback askcontent_answer_feedback_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_chunk_chunk_id ON askcontent.document_chunk USING btree (connector_id, chunk_id);
+ALTER TABLE ONLY askcontent.askcontent_answer_feedback
+    ADD CONSTRAINT askcontent_answer_feedback_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_chunk_fts; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback askcontent_answer_feedback_thread_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_chunk_fts ON askcontent.document_chunk USING gin (to_tsvector('english'::regconfig, text));
+ALTER TABLE ONLY askcontent.askcontent_answer_feedback
+    ADD CONSTRAINT askcontent_answer_feedback_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES askcontent.askcontent_chat_thread(id) ON DELETE SET NULL;
 
 
 --
--- Name: ix_document_fts; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback askcontent_answer_feedback_turn_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_document_fts ON askcontent.document USING gin (to_tsvector('english'::regconfig, ((COALESCE(title, ''::text) || ' '::text) || COALESCE(path, ''::text))));
+ALTER TABLE ONLY askcontent.askcontent_answer_feedback
+    ADD CONSTRAINT askcontent_answer_feedback_turn_id_fkey FOREIGN KEY (turn_id) REFERENCES askcontent.askcontent_chat_turn(id) ON DELETE SET NULL;
 
 
 --
--- Name: ix_document_scope; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_thread askcontent_chat_thread_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_document_scope ON askcontent.document USING btree (connector_id, in_scope);
+ALTER TABLE ONLY askcontent.askcontent_chat_thread
+    ADD CONSTRAINT askcontent_chat_thread_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE SET NULL;
 
 
 --
--- Name: ix_document_space; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_thread askcontent_chat_thread_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_document_space ON askcontent.document USING btree (connector_id, space);
+ALTER TABLE ONLY askcontent.askcontent_chat_thread
+    ADD CONSTRAINT askcontent_chat_thread_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_document_updated; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn askcontent_chat_turn_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_document_updated ON askcontent.document USING btree (connector_id, source_updated_at);
+ALTER TABLE ONLY askcontent.askcontent_chat_turn
+    ADD CONSTRAINT askcontent_chat_turn_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_embedding_lookup; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn askcontent_chat_turn_thread_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_embedding_lookup ON askcontent.embedding USING btree (connector_id, kind);
+ALTER TABLE ONLY askcontent.askcontent_chat_turn
+    ADD CONSTRAINT askcontent_chat_turn_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES askcontent.askcontent_chat_thread(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_embedding_vector_cosine; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member askcontent_collection_member_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_embedding_vector_cosine ON askcontent.embedding USING hnsw (vector extensions.vector_cosine_ops) WITH (m='16', ef_construction='64');
+ALTER TABLE ONLY askcontent.askcontent_collection_member
+    ADD CONSTRAINT askcontent_collection_member_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.askcontent_collection(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_eval_result_run; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member askcontent_collection_member_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_eval_result_run ON askcontent.eval_result USING btree (run_id);
+ALTER TABLE ONLY askcontent.askcontent_collection_member
+    ADD CONSTRAINT askcontent_collection_member_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_feedback_open; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_collection askcontent_collection_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_feedback_open ON askcontent.answer_feedback USING btree (connector_id, created_at DESC) WHERE (((verdict)::text = 'unhelpful'::text) AND (promoted_case_id IS NULL));
+ALTER TABLE ONLY askcontent.askcontent_collection
+    ADD CONSTRAINT askcontent_collection_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_glossary_status; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_rule askcontent_collection_rule_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_glossary_status ON askcontent.glossary_term USING btree (connector_id, status);
+ALTER TABLE ONLY askcontent.askcontent_collection_rule
+    ADD CONSTRAINT askcontent_collection_rule_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.askcontent_collection(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_job_claimable; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_rule askcontent_collection_rule_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_job_claimable ON askcontent.job USING btree (status, run_after) WHERE ((status)::text = ANY ((ARRAY['queued'::character varying, 'retry'::character varying])::text[]));
+ALTER TABLE ONLY askcontent.askcontent_collection_rule
+    ADD CONSTRAINT askcontent_collection_rule_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_job_queue; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_connector askcontent_connector_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_job_queue ON askcontent.job USING btree (status, created_at);
+ALTER TABLE ONLY askcontent.askcontent_connector
+    ADD CONSTRAINT askcontent_connector_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.askcontent_collection(id);
 
 
 --
--- Name: ix_member_checked; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_case askcontent_eval_case_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_member_checked ON askcontent.collection_member USING btree (collection_id, last_checked_at NULLS FIRST);
+ALTER TABLE ONLY askcontent.askcontent_eval_case
+    ADD CONSTRAINT askcontent_eval_case_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_member_state; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_case askcontent_eval_case_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_member_state ON askcontent.collection_member USING btree (collection_id, state);
+ALTER TABLE ONLY askcontent.askcontent_eval_case
+    ADD CONSTRAINT askcontent_eval_case_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: ix_message_thread; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result askcontent_eval_result_case_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_message_thread ON askcontent.message USING btree (thread_id, created_at);
+ALTER TABLE ONLY askcontent.askcontent_eval_result
+    ADD CONSTRAINT askcontent_eval_result_case_id_fkey FOREIGN KEY (case_id) REFERENCES askcontent.askcontent_eval_case(id) ON DELETE SET NULL;
 
 
 --
--- Name: ix_run_connector_time; Type: INDEX; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result askcontent_eval_result_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-CREATE INDEX ix_run_connector_time ON askcontent.retrieval_run USING btree (connector_id, created_at);
+ALTER TABLE ONLY askcontent.askcontent_eval_result
+    ADD CONSTRAINT askcontent_eval_result_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: answer_feedback answer_feedback_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result askcontent_eval_result_run_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.answer_feedback
-    ADD CONSTRAINT answer_feedback_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE SET NULL;
+ALTER TABLE ONLY askcontent.askcontent_eval_result
+    ADD CONSTRAINT askcontent_eval_result_run_id_fkey FOREIGN KEY (run_id) REFERENCES askcontent.askcontent_eval_run(id) ON DELETE CASCADE;
 
 
 --
--- Name: answer_feedback answer_feedback_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_run askcontent_eval_run_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.answer_feedback
-    ADD CONSTRAINT answer_feedback_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_eval_run
+    ADD CONSTRAINT askcontent_eval_run_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: answer_feedback answer_feedback_thread_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_run askcontent_eval_run_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.answer_feedback
-    ADD CONSTRAINT answer_feedback_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES askcontent.chat_thread(id) ON DELETE SET NULL;
+ALTER TABLE ONLY askcontent.askcontent_eval_run
+    ADD CONSTRAINT askcontent_eval_run_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: answer_feedback answer_feedback_turn_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_job askcontent_job_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.answer_feedback
-    ADD CONSTRAINT answer_feedback_turn_id_fkey FOREIGN KEY (turn_id) REFERENCES askcontent.chat_turn(id) ON DELETE SET NULL;
+ALTER TABLE ONLY askcontent.askcontent_job
+    ADD CONSTRAINT askcontent_job_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.askcontent_collection(id) ON DELETE CASCADE;
 
 
 --
--- Name: chat_thread chat_thread_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_upload askcontent_upload_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_thread
-    ADD CONSTRAINT chat_thread_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE SET NULL;
+ALTER TABLE ONLY askcontent.askcontent_upload
+    ADD CONSTRAINT askcontent_upload_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.askcontent_collection(id) ON DELETE CASCADE;
 
 
 --
--- Name: chat_thread chat_thread_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_upload askcontent_upload_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_thread
-    ADD CONSTRAINT chat_thread_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_upload
+    ADD CONSTRAINT askcontent_upload_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: chat_turn chat_turn_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_url_paste askcontent_url_paste_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_turn
-    ADD CONSTRAINT chat_turn_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_url_paste
+    ADD CONSTRAINT askcontent_url_paste_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.askcontent_collection(id) ON DELETE CASCADE;
 
 
 --
--- Name: chat_turn chat_turn_thread_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_url_paste askcontent_url_paste_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.chat_turn
-    ADD CONSTRAINT chat_turn_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES askcontent.chat_thread(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_url_paste
+    ADD CONSTRAINT askcontent_url_paste_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: collection_member collection_member_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_auth_session fk_askcontent_auth_session_user_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_member
-    ADD CONSTRAINT collection_member_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.collection(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_auth_session
+    ADD CONSTRAINT fk_askcontent_auth_session_user_id FOREIGN KEY (user_id) REFERENCES askcontent.askcontent_app_user(id) ON DELETE CASCADE;
 
 
 --
--- Name: collection_member collection_member_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_authority_rule fk_askcontent_authority_rule_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_member
-    ADD CONSTRAINT collection_member_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_authority_rule
+    ADD CONSTRAINT fk_askcontent_authority_rule_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: collection collection_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_authority_rule fk_askcontent_authority_rule_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection
-    ADD CONSTRAINT collection_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_authority_rule
+    ADD CONSTRAINT fk_askcontent_authority_rule_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: collection_rule collection_rule_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_connector fk_askcontent_connector_knowledgebase_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_rule
-    ADD CONSTRAINT collection_rule_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.collection(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_connector
+    ADD CONSTRAINT fk_askcontent_connector_knowledgebase_id FOREIGN KEY (knowledgebase_id) REFERENCES askcontent.askcontent_knowledgebase(id) ON DELETE RESTRICT;
 
 
 --
--- Name: collection_rule collection_rule_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_connector fk_askcontent_connector_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.collection_rule
-    ADD CONSTRAINT collection_rule_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_connector
+    ADD CONSTRAINT fk_askcontent_connector_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: connector connector_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_connector fk_askcontent_connector_workspace_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.connector
-    ADD CONSTRAINT connector_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.collection(id);
+ALTER TABLE ONLY askcontent.askcontent_connector
+    ADD CONSTRAINT fk_askcontent_connector_workspace_id FOREIGN KEY (workspace_id) REFERENCES askcontent.askcontent_workspace(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_case eval_case_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk fk_askcontent_document_chunk_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_case
-    ADD CONSTRAINT eval_case_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_document_chunk
+    ADD CONSTRAINT fk_askcontent_document_chunk_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_case eval_case_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk fk_askcontent_document_chunk_document_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_case
-    ADD CONSTRAINT eval_case_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_document_chunk
+    ADD CONSTRAINT fk_askcontent_document_chunk_document_id FOREIGN KEY (document_id) REFERENCES askcontent.askcontent_document(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_result eval_result_case_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk fk_askcontent_document_chunk_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_result
-    ADD CONSTRAINT eval_result_case_id_fkey FOREIGN KEY (case_id) REFERENCES askcontent.eval_case(id) ON DELETE SET NULL;
+ALTER TABLE ONLY askcontent.askcontent_document_chunk
+    ADD CONSTRAINT fk_askcontent_document_chunk_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_result eval_result_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document fk_askcontent_document_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_result
-    ADD CONSTRAINT eval_result_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_document
+    ADD CONSTRAINT fk_askcontent_document_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_result eval_result_run_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document fk_askcontent_document_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_result
-    ADD CONSTRAINT eval_result_run_id_fkey FOREIGN KEY (run_id) REFERENCES askcontent.eval_run(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_document
+    ADD CONSTRAINT fk_askcontent_document_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_run eval_run_connector_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin fk_askcontent_document_pin_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_run
-    ADD CONSTRAINT eval_run_connector_id_fkey FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_document_pin
+    ADD CONSTRAINT fk_askcontent_document_pin_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: eval_run eval_run_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin fk_askcontent_document_pin_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.eval_run
-    ADD CONSTRAINT eval_run_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_document_pin
+    ADD CONSTRAINT fk_askcontent_document_pin_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: auth_session fk_auth_session_user_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed fk_askcontent_embed_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.auth_session
-    ADD CONSTRAINT fk_auth_session_user_id FOREIGN KEY (user_id) REFERENCES askcontent.app_user(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_embed
+    ADD CONSTRAINT fk_askcontent_embed_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: authority_rule fk_authority_rule_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed fk_askcontent_embed_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.authority_rule
-    ADD CONSTRAINT fk_authority_rule_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_embed
+    ADD CONSTRAINT fk_askcontent_embed_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: authority_rule fk_authority_rule_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed_session fk_askcontent_embed_session_embed_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.authority_rule
-    ADD CONSTRAINT fk_authority_rule_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_embed_session
+    ADD CONSTRAINT fk_askcontent_embed_session_embed_id FOREIGN KEY (embed_id) REFERENCES askcontent.askcontent_embed(id) ON DELETE CASCADE;
 
 
 --
--- Name: connector fk_connector_knowledgebase_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed_session fk_askcontent_embed_session_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.connector
-    ADD CONSTRAINT fk_connector_knowledgebase_id FOREIGN KEY (knowledgebase_id) REFERENCES askcontent.knowledgebase(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY askcontent.askcontent_embed_session
+    ADD CONSTRAINT fk_askcontent_embed_session_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: connector fk_connector_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding fk_askcontent_embedding_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.connector
-    ADD CONSTRAINT fk_connector_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_embedding
+    ADD CONSTRAINT fk_askcontent_embedding_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: connector fk_connector_workspace_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding fk_askcontent_embedding_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.connector
-    ADD CONSTRAINT fk_connector_workspace_id FOREIGN KEY (workspace_id) REFERENCES askcontent.workspace(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_embedding
+    ADD CONSTRAINT fk_askcontent_embedding_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: document_chunk fk_document_chunk_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule fk_askcontent_field_rule_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_chunk
-    ADD CONSTRAINT fk_document_chunk_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_field_rule
+    ADD CONSTRAINT fk_askcontent_field_rule_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: document_chunk fk_document_chunk_document_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule fk_askcontent_field_rule_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_chunk
-    ADD CONSTRAINT fk_document_chunk_document_id FOREIGN KEY (document_id) REFERENCES askcontent.document(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_field_rule
+    ADD CONSTRAINT fk_askcontent_field_rule_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: document_chunk fk_document_chunk_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term fk_askcontent_glossary_term_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_chunk
-    ADD CONSTRAINT fk_document_chunk_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_glossary_term
+    ADD CONSTRAINT fk_askcontent_glossary_term_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: document fk_document_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term fk_askcontent_glossary_term_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document
-    ADD CONSTRAINT fk_document_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_glossary_term
+    ADD CONSTRAINT fk_askcontent_glossary_term_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: document fk_document_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_job fk_askcontent_job_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document
-    ADD CONSTRAINT fk_document_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_job
+    ADD CONSTRAINT fk_askcontent_job_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: document_pin fk_document_pin_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_job fk_askcontent_job_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_pin
-    ADD CONSTRAINT fk_document_pin_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_job
+    ADD CONSTRAINT fk_askcontent_job_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: document_pin fk_document_pin_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_knowledgebase fk_askcontent_knowledgebase_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.document_pin
-    ADD CONSTRAINT fk_document_pin_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_knowledgebase
+    ADD CONSTRAINT fk_askcontent_knowledgebase_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: embed fk_embed_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_membership fk_askcontent_membership_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed
-    ADD CONSTRAINT fk_embed_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_membership
+    ADD CONSTRAINT fk_askcontent_membership_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: embed fk_embed_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_membership fk_askcontent_membership_user_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed
-    ADD CONSTRAINT fk_embed_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_membership
+    ADD CONSTRAINT fk_askcontent_membership_user_id FOREIGN KEY (user_id) REFERENCES askcontent.askcontent_app_user(id) ON DELETE CASCADE;
 
 
 --
--- Name: embed_session fk_embed_session_embed_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_message fk_askcontent_message_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed_session
-    ADD CONSTRAINT fk_embed_session_embed_id FOREIGN KEY (embed_id) REFERENCES askcontent.embed(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_message
+    ADD CONSTRAINT fk_askcontent_message_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: embed_session fk_embed_session_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_message fk_askcontent_message_thread_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embed_session
-    ADD CONSTRAINT fk_embed_session_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_message
+    ADD CONSTRAINT fk_askcontent_message_thread_id FOREIGN KEY (thread_id) REFERENCES askcontent.askcontent_thread(id) ON DELETE CASCADE;
 
 
 --
--- Name: embedding fk_embedding_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_quarantine_item fk_askcontent_quarantine_item_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embedding
-    ADD CONSTRAINT fk_embedding_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_quarantine_item
+    ADD CONSTRAINT fk_askcontent_quarantine_item_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: embedding fk_embedding_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_quarantine_item fk_askcontent_quarantine_item_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.embedding
-    ADD CONSTRAINT fk_embedding_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_quarantine_item
+    ADD CONSTRAINT fk_askcontent_quarantine_item_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: field_rule fk_field_rule_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_label_rule fk_askcontent_rbac_label_rule_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.field_rule
-    ADD CONSTRAINT fk_field_rule_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_label_rule
+    ADD CONSTRAINT fk_askcontent_rbac_label_rule_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: field_rule fk_field_rule_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_label_rule fk_askcontent_rbac_label_rule_role_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.field_rule
-    ADD CONSTRAINT fk_field_rule_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_label_rule
+    ADD CONSTRAINT fk_askcontent_rbac_label_rule_role_id FOREIGN KEY (role_id) REFERENCES askcontent.askcontent_rbac_role(id) ON DELETE CASCADE;
 
 
 --
--- Name: glossary_term fk_glossary_term_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_policy_version fk_askcontent_rbac_policy_version_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.glossary_term
-    ADD CONSTRAINT fk_glossary_term_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_policy_version
+    ADD CONSTRAINT fk_askcontent_rbac_policy_version_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: glossary_term fk_glossary_term_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_policy_version fk_askcontent_rbac_policy_version_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.glossary_term
-    ADD CONSTRAINT fk_glossary_term_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_policy_version
+    ADD CONSTRAINT fk_askcontent_rbac_policy_version_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: job fk_job_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role fk_askcontent_rbac_role_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.job
-    ADD CONSTRAINT fk_job_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_role
+    ADD CONSTRAINT fk_askcontent_rbac_role_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: job fk_job_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role_member fk_askcontent_rbac_role_member_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.job
-    ADD CONSTRAINT fk_job_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_role_member
+    ADD CONSTRAINT fk_askcontent_rbac_role_member_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: knowledgebase fk_knowledgebase_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role_member fk_askcontent_rbac_role_member_role_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.knowledgebase
-    ADD CONSTRAINT fk_knowledgebase_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_role_member
+    ADD CONSTRAINT fk_askcontent_rbac_role_member_role_id FOREIGN KEY (role_id) REFERENCES askcontent.askcontent_rbac_role(id) ON DELETE CASCADE;
 
 
 --
--- Name: membership fk_membership_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role fk_askcontent_rbac_role_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.membership
-    ADD CONSTRAINT fk_membership_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_rbac_role
+    ADD CONSTRAINT fk_askcontent_rbac_role_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: membership fk_membership_user_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_plan fk_askcontent_retrieval_plan_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.membership
-    ADD CONSTRAINT fk_membership_user_id FOREIGN KEY (user_id) REFERENCES askcontent.app_user(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_retrieval_plan
+    ADD CONSTRAINT fk_askcontent_retrieval_plan_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: message fk_message_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_plan fk_askcontent_retrieval_plan_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.message
-    ADD CONSTRAINT fk_message_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_retrieval_plan
+    ADD CONSTRAINT fk_askcontent_retrieval_plan_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: message fk_message_thread_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_run fk_askcontent_retrieval_run_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.message
-    ADD CONSTRAINT fk_message_thread_id FOREIGN KEY (thread_id) REFERENCES askcontent.thread(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_retrieval_run
+    ADD CONSTRAINT fk_askcontent_retrieval_run_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: quarantine_item fk_quarantine_item_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_run fk_askcontent_retrieval_run_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.quarantine_item
-    ADD CONSTRAINT fk_quarantine_item_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_retrieval_run
+    ADD CONSTRAINT fk_askcontent_retrieval_run_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: quarantine_item fk_quarantine_item_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_scope_change fk_askcontent_scope_change_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.quarantine_item
-    ADD CONSTRAINT fk_quarantine_item_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_scope_change
+    ADD CONSTRAINT fk_askcontent_scope_change_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: rbac_label_rule fk_rbac_label_rule_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_scope_change fk_askcontent_scope_change_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_label_rule
-    ADD CONSTRAINT fk_rbac_label_rule_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_scope_change
+    ADD CONSTRAINT fk_askcontent_scope_change_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: rbac_label_rule fk_rbac_label_rule_role_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_thread fk_askcontent_thread_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_label_rule
-    ADD CONSTRAINT fk_rbac_label_rule_role_id FOREIGN KEY (role_id) REFERENCES askcontent.rbac_role(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_thread
+    ADD CONSTRAINT fk_askcontent_thread_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.askcontent_connector(id) ON DELETE CASCADE;
 
 
 --
--- Name: rbac_policy_version fk_rbac_policy_version_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_thread fk_askcontent_thread_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_policy_version
-    ADD CONSTRAINT fk_rbac_policy_version_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_thread
+    ADD CONSTRAINT fk_askcontent_thread_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: rbac_policy_version fk_rbac_policy_version_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_thread fk_askcontent_thread_user_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_policy_version
-    ADD CONSTRAINT fk_rbac_policy_version_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_thread
+    ADD CONSTRAINT fk_askcontent_thread_user_id FOREIGN KEY (user_id) REFERENCES askcontent.askcontent_app_user(id) ON DELETE SET NULL;
 
 
 --
--- Name: rbac_role fk_rbac_role_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_thread fk_askcontent_thread_workspace_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role
-    ADD CONSTRAINT fk_rbac_role_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_thread
+    ADD CONSTRAINT fk_askcontent_thread_workspace_id FOREIGN KEY (workspace_id) REFERENCES askcontent.askcontent_workspace(id) ON DELETE CASCADE;
 
 
 --
--- Name: rbac_role_member fk_rbac_role_member_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_workspace fk_askcontent_workspace_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role_member
-    ADD CONSTRAINT fk_rbac_role_member_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE ONLY askcontent.askcontent_workspace
+    ADD CONSTRAINT fk_askcontent_workspace_org_id FOREIGN KEY (org_id) REFERENCES askcontent.askcontent_org(id) ON DELETE CASCADE;
 
 
 --
--- Name: rbac_role_member fk_rbac_role_member_role_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback answer_feedback_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role_member
-    ADD CONSTRAINT fk_rbac_role_member_role_id FOREIGN KEY (role_id) REFERENCES askcontent.rbac_role(id) ON DELETE CASCADE;
+CREATE POLICY answer_feedback_tenant_isolation ON askcontent.askcontent_answer_feedback USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: rbac_role fk_rbac_role_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_answer_feedback; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.rbac_role
-    ADD CONSTRAINT fk_rbac_role_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_answer_feedback ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: retrieval_plan fk_retrieval_plan_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_authority_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.retrieval_plan
-    ADD CONSTRAINT fk_retrieval_plan_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_authority_rule ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: retrieval_plan fk_retrieval_plan_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_thread; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-ALTER TABLE ONLY askcontent.retrieval_plan
-    ADD CONSTRAINT fk_retrieval_plan_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
 
+ALTER TABLE askcontent.askcontent_chat_thread ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: retrieval_run fk_retrieval_run_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.retrieval_run
-    ADD CONSTRAINT fk_retrieval_run_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_chat_turn ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: retrieval_run fk_retrieval_run_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.retrieval_run
-    ADD CONSTRAINT fk_retrieval_run_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_collection ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: scope_change fk_scope_change_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-ALTER TABLE ONLY askcontent.scope_change
-    ADD CONSTRAINT fk_scope_change_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
 
+ALTER TABLE askcontent.askcontent_collection_member ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: scope_change fk_scope_change_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.scope_change
-    ADD CONSTRAINT fk_scope_change_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_collection_rule ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: thread fk_thread_connector_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_connector; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.thread
-    ADD CONSTRAINT fk_thread_connector_id FOREIGN KEY (connector_id) REFERENCES askcontent.connector(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_connector ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: thread fk_thread_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-ALTER TABLE ONLY askcontent.thread
-    ADD CONSTRAINT fk_thread_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
 
+ALTER TABLE askcontent.askcontent_document ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: thread fk_thread_user_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.thread
-    ADD CONSTRAINT fk_thread_user_id FOREIGN KEY (user_id) REFERENCES askcontent.app_user(id) ON DELETE SET NULL;
+ALTER TABLE askcontent.askcontent_document_chunk ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: thread fk_thread_workspace_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.thread
-    ADD CONSTRAINT fk_thread_workspace_id FOREIGN KEY (workspace_id) REFERENCES askcontent.workspace(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_document_pin ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: workspace fk_workspace_org_id; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-ALTER TABLE ONLY askcontent.workspace
-    ADD CONSTRAINT fk_workspace_org_id FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
 
+ALTER TABLE askcontent.askcontent_embed ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: job job_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embed_session; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.job
-    ADD CONSTRAINT job_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.collection(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_embed_session ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: upload upload_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.upload
-    ADD CONSTRAINT upload_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.collection(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_embedding ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: upload upload_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_case; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-ALTER TABLE ONLY askcontent.upload
-    ADD CONSTRAINT upload_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
 
+ALTER TABLE askcontent.askcontent_eval_case ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: url_paste url_paste_collection_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.url_paste
-    ADD CONSTRAINT url_paste_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES askcontent.collection(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_eval_result ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: url_paste url_paste_org_id_fkey; Type: FK CONSTRAINT; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_run; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE ONLY askcontent.url_paste
-    ADD CONSTRAINT url_paste_org_id_fkey FOREIGN KEY (org_id) REFERENCES askcontent.org(id) ON DELETE CASCADE;
+ALTER TABLE askcontent.askcontent_eval_run ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: answer_feedback; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.answer_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_field_rule ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: answer_feedback answer_feedback_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY answer_feedback_tenant_isolation ON askcontent.answer_feedback USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+ALTER TABLE askcontent.askcontent_glossary_term ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: authority_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_job; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.authority_rule ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_job ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: authority_rule authority_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_knowledgebase; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY authority_rule_tenant_isolation ON askcontent.authority_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+ALTER TABLE askcontent.askcontent_knowledgebase ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: chat_thread; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_membership; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.chat_thread ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_membership ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: chat_thread chat_thread_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_message; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY chat_thread_tenant_isolation ON askcontent.chat_thread USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+ALTER TABLE askcontent.askcontent_message ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: chat_turn; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_quarantine_item; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.chat_turn ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_quarantine_item ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: chat_turn chat_turn_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_label_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY chat_turn_tenant_isolation ON askcontent.chat_turn USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+ALTER TABLE askcontent.askcontent_rbac_label_rule ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: collection; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_policy_version; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.collection ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_rbac_policy_version ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: collection_member; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.collection_member ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_rbac_role ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: collection_member collection_member_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role_member; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY collection_member_tenant_isolation ON askcontent.collection_member USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+ALTER TABLE askcontent.askcontent_rbac_role_member ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: collection_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_plan; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.collection_rule ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_retrieval_plan ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: collection_rule collection_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_run; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY collection_rule_tenant_isolation ON askcontent.collection_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+ALTER TABLE askcontent.askcontent_retrieval_run ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: collection collection_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_scope_change; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY collection_tenant_isolation ON askcontent.collection USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+ALTER TABLE askcontent.askcontent_scope_change ENABLE ROW LEVEL SECURITY;
 
-
 --
--- Name: connector; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_thread; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.connector ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_thread ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: connector connector_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_upload; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY connector_tenant_isolation ON askcontent.connector USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+ALTER TABLE askcontent.askcontent_upload ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: document; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_url_paste; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.document ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_url_paste ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: document_chunk; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_workspace; Type: ROW SECURITY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.document_chunk ENABLE ROW LEVEL SECURITY;
+ALTER TABLE askcontent.askcontent_workspace ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: document_chunk document_chunk_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_authority_rule authority_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY document_chunk_tenant_isolation ON askcontent.document_chunk USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY authority_rule_tenant_isolation ON askcontent.askcontent_authority_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: document_pin; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_thread chat_thread_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.document_pin ENABLE ROW LEVEL SECURITY;
+CREATE POLICY chat_thread_tenant_isolation ON askcontent.askcontent_chat_thread USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
---
--- Name: document_pin document_pin_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
---
-
-CREATE POLICY document_pin_tenant_isolation ON askcontent.document_pin USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-
 --
--- Name: document document_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_chat_turn chat_turn_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY document_tenant_isolation ON askcontent.document USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY chat_turn_tenant_isolation ON askcontent.askcontent_chat_turn USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: embed; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_member collection_member_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.embed ENABLE ROW LEVEL SECURITY;
-
---
--- Name: embed_session; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY collection_member_tenant_isolation ON askcontent.askcontent_collection_member USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.embed_session ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: embed_session embed_session_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_collection_rule collection_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY embed_session_tenant_isolation ON askcontent.embed_session USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY collection_rule_tenant_isolation ON askcontent.askcontent_collection_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: embed embed_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_collection collection_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY embed_tenant_isolation ON askcontent.embed USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
 
---
--- Name: embedding; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY collection_tenant_isolation ON askcontent.askcontent_collection USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.embedding ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: embedding embedding_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_connector connector_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY embedding_tenant_isolation ON askcontent.embedding USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+CREATE POLICY connector_tenant_isolation ON askcontent.askcontent_connector USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
---
--- Name: eval_case; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
-
-ALTER TABLE askcontent.eval_case ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: eval_case eval_case_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_document_chunk document_chunk_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY eval_case_tenant_isolation ON askcontent.eval_case USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
-
---
--- Name: eval_result; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY document_chunk_tenant_isolation ON askcontent.askcontent_document_chunk USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.eval_result ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: eval_result eval_result_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_document_pin document_pin_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY eval_result_tenant_isolation ON askcontent.eval_result USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
 
---
--- Name: eval_run; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY document_pin_tenant_isolation ON askcontent.askcontent_document_pin USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.eval_run ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: eval_run eval_run_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_document document_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY eval_run_tenant_isolation ON askcontent.eval_run USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
 
---
--- Name: field_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY document_tenant_isolation ON askcontent.askcontent_document USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.field_rule ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: field_rule field_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_embed_session embed_session_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY field_rule_tenant_isolation ON askcontent.field_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-
---
--- Name: glossary_term; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY embed_session_tenant_isolation ON askcontent.askcontent_embed_session USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.glossary_term ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: glossary_term glossary_term_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_embed embed_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY glossary_term_tenant_isolation ON askcontent.glossary_term USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY embed_tenant_isolation ON askcontent.askcontent_embed USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: job; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_embedding embedding_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-ALTER TABLE askcontent.job ENABLE ROW LEVEL SECURITY;
-
---
--- Name: job job_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
---
-
-CREATE POLICY job_tenant_isolation ON askcontent.job USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
 
---
--- Name: knowledgebase; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY embedding_tenant_isolation ON askcontent.askcontent_embedding USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.knowledgebase ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: knowledgebase knowledgebase_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_case eval_case_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY knowledgebase_tenant_isolation ON askcontent.knowledgebase USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-
---
--- Name: membership; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY eval_case_tenant_isolation ON askcontent.askcontent_eval_case USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.membership ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: membership membership_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_result eval_result_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY membership_tenant_isolation ON askcontent.membership USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY eval_result_tenant_isolation ON askcontent.askcontent_eval_result USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: message; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_eval_run eval_run_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.message ENABLE ROW LEVEL SECURITY;
-
---
--- Name: message message_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
---
-
-CREATE POLICY message_tenant_isolation ON askcontent.message USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
-
---
--- Name: quarantine_item; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY eval_run_tenant_isolation ON askcontent.askcontent_eval_run USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.quarantine_item ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: quarantine_item quarantine_item_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_field_rule field_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY quarantine_item_tenant_isolation ON askcontent.quarantine_item USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
 
---
--- Name: rbac_label_rule; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY field_rule_tenant_isolation ON askcontent.askcontent_field_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.rbac_label_rule ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: rbac_label_rule rbac_label_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_glossary_term glossary_term_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
-
-CREATE POLICY rbac_label_rule_tenant_isolation ON askcontent.rbac_label_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+CREATE POLICY glossary_term_tenant_isolation ON askcontent.askcontent_glossary_term USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
---
--- Name: rbac_policy_version; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
-
-ALTER TABLE askcontent.rbac_policy_version ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: rbac_policy_version rbac_policy_version_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_job job_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY rbac_policy_version_tenant_isolation ON askcontent.rbac_policy_version USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY job_tenant_isolation ON askcontent.askcontent_job USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: rbac_role; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_knowledgebase knowledgebase_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.rbac_role ENABLE ROW LEVEL SECURITY;
-
---
--- Name: rbac_role_member; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
+CREATE POLICY knowledgebase_tenant_isolation ON askcontent.askcontent_knowledgebase USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.rbac_role_member ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: rbac_role_member rbac_role_member_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_membership membership_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY rbac_role_member_tenant_isolation ON askcontent.rbac_role_member USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY membership_tenant_isolation ON askcontent.askcontent_membership USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: rbac_role rbac_role_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_message message_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY rbac_role_tenant_isolation ON askcontent.rbac_role USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY message_tenant_isolation ON askcontent.askcontent_message USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: retrieval_plan; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_quarantine_item quarantine_item_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.retrieval_plan ENABLE ROW LEVEL SECURITY;
+CREATE POLICY quarantine_item_tenant_isolation ON askcontent.askcontent_quarantine_item USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
---
--- Name: retrieval_plan retrieval_plan_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
---
-
-CREATE POLICY retrieval_plan_tenant_isolation ON askcontent.retrieval_plan USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
-
-
---
--- Name: retrieval_run; Type: ROW SECURITY; Schema: askcontent; Owner: -
---
 
-ALTER TABLE askcontent.retrieval_run ENABLE ROW LEVEL SECURITY;
-
 --
--- Name: retrieval_run retrieval_run_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_label_rule rbac_label_rule_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY retrieval_run_tenant_isolation ON askcontent.retrieval_run USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY rbac_label_rule_tenant_isolation ON askcontent.askcontent_rbac_label_rule USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: scope_change; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_policy_version rbac_policy_version_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
+
+CREATE POLICY rbac_policy_version_tenant_isolation ON askcontent.askcontent_rbac_policy_version USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.scope_change ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: scope_change scope_change_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role_member rbac_role_member_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY scope_change_tenant_isolation ON askcontent.scope_change USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY rbac_role_member_tenant_isolation ON askcontent.askcontent_rbac_role_member USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: thread; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_rbac_role rbac_role_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.thread ENABLE ROW LEVEL SECURITY;
+CREATE POLICY rbac_role_tenant_isolation ON askcontent.askcontent_rbac_role USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+
 --
--- Name: thread thread_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_plan retrieval_plan_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY thread_tenant_isolation ON askcontent.thread USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY retrieval_plan_tenant_isolation ON askcontent.askcontent_retrieval_plan USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: upload; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_retrieval_run retrieval_run_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
+
+CREATE POLICY retrieval_run_tenant_isolation ON askcontent.askcontent_retrieval_run USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.upload ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: upload upload_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_scope_change scope_change_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY upload_tenant_isolation ON askcontent.upload USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY scope_change_tenant_isolation ON askcontent.askcontent_scope_change USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: url_paste; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_thread thread_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-ALTER TABLE askcontent.url_paste ENABLE ROW LEVEL SECURITY;
+CREATE POLICY thread_tenant_isolation ON askcontent.askcontent_thread USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
+
 --
--- Name: url_paste url_paste_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_upload upload_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY url_paste_tenant_isolation ON askcontent.url_paste USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY upload_tenant_isolation ON askcontent.askcontent_upload USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
--- Name: workspace; Type: ROW SECURITY; Schema: askcontent; Owner: -
+-- Name: askcontent_url_paste url_paste_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
+
+CREATE POLICY url_paste_tenant_isolation ON askcontent.askcontent_url_paste USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
-ALTER TABLE askcontent.workspace ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: workspace workspace_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
+-- Name: askcontent_workspace workspace_tenant_isolation; Type: POLICY; Schema: askcontent; Owner: -
 --
 
-CREATE POLICY workspace_tenant_isolation ON askcontent.workspace USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
+CREATE POLICY workspace_tenant_isolation ON askcontent.askcontent_workspace USING ((org_id = askcontent.current_org())) WITH CHECK ((org_id = askcontent.current_org()));
 
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict m66fdwBQSMtWIwjFhW7O8OUrFqpr8WMnX9GWQhse3xt4QVqg2A0g83YXHsf02AB
+\unrestrict iP4Z16zN1ABAY3bYYZinhgMoTsr0Sntbxil1eJd0HPHigHAjBh2bBG6NIGIUS3H
 
