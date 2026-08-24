@@ -92,8 +92,13 @@ def run(
 ) -> Iterator[tuple[str, Any]]:
     """Yield `(event, payload)` as the run proceeds, then `("report", Report)`.
 
-    Events: `plan`, `finding`, `limit`, `token`. The caller decides how to
-    render them; nothing here knows about SSE.
+    Events: `phase`, `plan`, `finding`, `limit`, `token`. The caller decides
+    how to render them; nothing here knows about SSE.
+
+    `phase` is emitted on entering each of the four, with the work it is
+    about to do. A run takes minutes, and a reader who can see which phase is
+    running and how many parts are left is waiting; one watching a spinner is
+    wondering whether it has hung.
     """
     from ..domain.retrieval_spec import Intent, RetrievalSpec
 
@@ -104,6 +109,8 @@ def run(
     passages_read = 0
 
     model = _chat(platform, cfg.get("model"))
+
+    yield "phase", {"phase": "plan", "done": 0, "total": 0}
 
     # ① plan -----------------------------------------------------------------
     plan = _plan(model, question, cfg["max_sub_questions"])
@@ -116,6 +123,7 @@ def run(
     yield "plan", plan
 
     # ② investigate ----------------------------------------------------------
+    yield "phase", {"phase": "investigate", "done": 0, "total": len(plan)}
     findings: list[Finding] = []
     citations: list[Any] = []
     seen_chunks: set[str] = set()
@@ -171,9 +179,12 @@ def run(
         )
         findings.append(finding)
         yield "finding", finding
+        yield "phase", {"phase": "investigate",
+                        "done": len(findings), "total": len(plan)}
 
     # ③ verify ---------------------------------------------------------------
     if cfg["verify"]:
+        yield "phase", {"phase": "verify", "done": 0, "total": len(findings)}
         for i, finding in enumerate(findings):
             if not finding.statement.strip():
                 continue
@@ -185,8 +196,11 @@ def run(
                     "refuted_because": "no passage supported it",
                 })
                 yield "finding", findings[i]
+            yield "phase", {"phase": "verify",
+                            "done": i + 1, "total": len(findings)}
 
     # ④ synthesise -----------------------------------------------------------
+    yield "phase", {"phase": "synthesise", "done": 0, "total": 0}
     usable = [f for f in findings if f.usable]
     if not usable:
         report = Report(

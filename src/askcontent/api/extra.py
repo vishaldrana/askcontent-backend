@@ -2349,15 +2349,20 @@ def _research_turn(platform, connector, body, principal, started):
         return
 
     _, tone = _answering_for(body.connector_id)
-    phases = [
-        ("plan", "Planning the investigation"),
-        ("investigate", "Investigating each part"),
-        ("synthesise", "Writing the report"),
-    ]
-    yield _sse({"type": "tool_start", "name": phases[0][0], "label": phases[0][1]})
+
+    # Its own events, not the step list.
+    #
+    # A research run is not five stages that either succeeded or did not; it
+    # is a plan somebody may disagree with, a set of parts each with an answer
+    # and a verdict, and a report at the end. Squeezed into tool_start /
+    # tool_end it rendered as "Investigating each part" repeated four times,
+    # which says nothing about what is being investigated. The screen renders
+    # these instead of the trace, so the shape of the work is the shape of
+    # what is shown.
+    yield _sse({"type": "research_started", "depth": config["depth"],
+                "verify": bool(config.get("verify"))})
 
     report = None
-    findings = 0
     for event, payload in run_research(
         platform, connector, body.question,
         principal=principal,
@@ -2367,33 +2372,23 @@ def _research_turn(platform, connector, body, principal, started):
         instructions=_instructions_for(body.connector_id),
         tone=tone,
     ):
-        if event == "plan":
-            yield _sse({"type": "tool_end", "name": "plan", "label": phases[0][1],
-                        "status": "ok",
-                        "detail": " · ".join(q.question for q in payload)})
-            yield _sse({"type": "tool_start", "name": "investigate",
-                        "label": phases[1][1]})
+        if event == "phase":
+            yield _sse({"type": "research_phase", **payload})
+        elif event == "plan":
+            yield _sse({"type": "research_plan", "sub_questions": [
+                q.model_dump(mode="json") for q in payload
+            ]})
         elif event == "finding":
-            findings += 1
-            yield _sse({"type": "tool_end", "name": "investigate",
-                        "label": phases[1][1], "status": "ok",
-                        "detail": f"{findings} answered"})
-            yield _sse({"type": "tool_start", "name": "investigate",
-                        "label": phases[1][1]})
+            yield _sse({"type": "research_finding", **payload.model_dump(mode="json")})
         elif event == "limit":
             # A limit reached is reported, never logged. A run that quietly
             # stopped and wrote a confident report is the failure the whole
             # design is against.
-            yield _sse({"type": "tool_end", "name": payload.name,
-                        "label": f"Stopped: {payload.name}", "status": "warn",
-                        "detail": payload.detail})
+            yield _sse({"type": "research_limit", **payload.model_dump(mode="json")})
         elif event == "token":
             yield _sse({"type": "token", "text": payload})
         elif event == "report":
             report = payload
-
-    yield _sse({"type": "tool_end", "name": "investigate", "label": phases[1][1],
-                "status": "ok", "detail": f"{findings} sub-questions"})
 
     # Built as an Evidence, not as a dict that resembles one.
     #
@@ -3004,6 +2999,10 @@ class ThreadPatch(BaseModel):
     title: str | None = None
     role: str | None = None
     archived: bool | None = None
+    #: What deep research should cost on this thread. Set from the composer,
+    #: kept because a choice that does not survive a reload is not worth
+    #: making twice.
+    research: dict | None = None
 
 
 class TurnCreate(BaseModel):
@@ -3021,7 +3020,7 @@ class TurnCreate(BaseModel):
 def _thread_row(session, thread_id: str):
     row = session.execute(text(f"""
         SELECT CAST(t.id AS text) AS id, t.title, t.role, t.archived_at,
-               t.created_at, t.updated_at,
+               t.created_at, t.updated_at, t.research,
                c.slug AS connector_id,
                (SELECT count(*) FROM {S}.chat_turn x WHERE x.thread_id = t.id) AS turns
         FROM {S}.chat_thread t
@@ -3061,7 +3060,7 @@ def list_threads(connector_id: str | None = None, limit: int = 100) -> list[dict
     with _sessions()() as session:
         rows = session.execute(text(f"""
             SELECT CAST(t.id AS text) AS id, t.title, t.role,
-                   t.created_at, t.updated_at,
+                   t.created_at, t.updated_at, t.research,
                    c.slug AS connector_id,
                    (SELECT count(*) FROM {S}.chat_turn x WHERE x.thread_id = t.id) AS turns
             FROM {S}.chat_thread t
@@ -3097,6 +3096,7 @@ def update_thread(thread_id: str, body: ThreadPatch) -> dict:
             UPDATE {S}.chat_thread SET
                 title = coalesce(:t, title),
                 role = coalesce(:r, role),
+                research = coalesce(CAST(:research AS jsonb), research),
                 archived_at = CASE WHEN :arch IS NULL THEN archived_at
                                    WHEN :arch THEN now() ELSE NULL END,
                 updated_at = now()
@@ -3104,6 +3104,7 @@ def update_thread(thread_id: str, body: ThreadPatch) -> dict:
         """), {
             "id": thread_id, "o": _org(session), "t": body.title,
             "r": body.role, "arch": body.archived,
+            "research": json.dumps(body.research) if body.research is not None else None,
         })
         session.commit()
         return _thread_row(session, thread_id)
