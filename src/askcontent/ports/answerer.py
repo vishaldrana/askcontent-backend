@@ -69,6 +69,10 @@ class AnswerChunk:
     #: Separate from `cited` because it is a different kind of support: a
     #: passage can be opened and checked, a page cannot.
     used_page: bool = False
+    #: Datapoint numbers the answer used — the `1` in `[d1]`. Separate from
+    #: `cited` for the same reason, and numbered separately so a marker can
+    #: never be ambiguous about which kind of evidence it names.
+    used_data: tuple[int, ...] = ()
     usage: dict = field(default_factory=dict)
 
 
@@ -84,6 +88,7 @@ class Answerer(Protocol):
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
         page: object | None = None,
+        data: object | None = None,
     ) -> AsyncIterator[AnswerChunk]:
         """Stream a grounded answer.
 
@@ -100,5 +105,10 @@ class Answerer(Protocol):
         showing. It is a source, unlike history — but a different kind from a
         passage, and it is attributed `[page]` so a reader can tell "your
         documentation says" from "the screen in front of you says".
+
+        `data` is a `DatapointSet` when a configured source was called. Same
+        argument, one step further: these are values that were true at a named
+        instant and are attributed `[d1]`, `[d2]`, because a reader cannot open
+        them and the interface must not imply otherwise.
         """
         ...

@@ -134,7 +134,7 @@ def system_prompt(instructions: str = "") -> str:
 
 def render(question: str, passages: Sequence[Passage],
            history: Sequence[tuple[str, str]] = (),
-           page=None) -> str:
+           page=None, data=None) -> str:
     """The user turn: the evidence, then the question.
 
     Evidence goes first because it is what the answer must be built from, and
@@ -169,6 +169,16 @@ def render(question: str, passages: Sequence[Passage],
             "attributed [page], never a document)",
             "<<<",
             page.render(),
+            ">>>",
+        ]
+
+    if data is not None and getattr(data, "usable", False):
+        parts += [
+            "",
+            "LIVE VALUES (read just now from a connected system — each is "
+            "attributed [d1], [d2] and none of them is a document)",
+            "<<<",
+            data.render(),
             ">>>",
         ]
 

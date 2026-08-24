@@ -146,10 +146,13 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
 
     passages.stored = _StoredPassagesRouter(engine, sessions, org_id, embedder.model_id)
 
+    from .adapters.context.http_source import HttpContextFetcher
+
     return Platform(
         index=index, repository=repository, embedder=embedder, reranker=reranker,
         passages=passages, retrieval=retrieval, registry=registry,
         answering=AnsweringService(build_answerer()),
+        context_fetcher=HttpContextFetcher(),
     )
 
 
@@ -307,6 +310,10 @@ class Platform:
     retrieval: RetrievalService
     registry: Registry
     answering: AnsweringService
+    #: Reads a connector's configured live source. Held on the platform rather
+    #: than imported where it is used, so the service layer stays free of
+    #: adapters and a deployment can substitute one.
+    context_fetcher: object = None
 
 
 def build(*, simulate_latency: bool = True, failure_rate: float = 0.0) -> Platform:

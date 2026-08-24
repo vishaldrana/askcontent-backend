@@ -902,6 +902,77 @@ def scope_facets(slug: str) -> dict:
     }
 
 
+class ContextSourcePatch(BaseModel):
+    source: dict | None = None
+
+
+@router.get("/api/connectors/{slug}/context-source")
+def get_context_source(slug: str) -> dict:
+    with _sessions()() as session:
+        stored = session.execute(text(f"""
+            SELECT context_source FROM {S}.connector
+             WHERE org_id = :o AND slug = :s
+        """), {"o": _org(session), "s": slug}).scalar_one_or_none()
+    return {"source": stored}
+
+
+@router.put("/api/connectors/{slug}/context-source")
+def set_context_source(slug: str, body: ContextSourcePatch) -> dict:
+    """Configure — or remove — the one live source this connector may read.
+
+    Validated here rather than at read time, so a configuration that cannot
+    work is refused by the person who typed it instead of failing silently in
+    front of a visitor.
+    """
+    from ..domain.datapoint import ContextSource
+
+    source = body.source
+    if source:
+        try:
+            parsed = ContextSource.model_validate(source)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, f"that source is not valid: {exc}") from None
+        if "{key}" not in parsed.url:
+            raise HTTPException(
+                400,
+                "the URL needs a {key} placeholder — it is where the page's "
+                "identifier goes, and without it every visitor would read the "
+                "same record.",
+            )
+        if not parsed.url.lower().startswith(("http://", "https://")):
+            raise HTTPException(400, "the URL must be http or https")
+        if not parsed.fields:
+            raise HTTPException(
+                400,
+                "name at least one field to keep. Without a mapping the whole "
+                "response reaches the model, including fields nobody meant to "
+                "expose.",
+            )
+        if parsed.key_pattern:
+            import re as _re
+
+            try:
+                _re.compile(parsed.key_pattern)
+            except _re.error as exc:
+                raise HTTPException(400, f"that key pattern does not compile: {exc}") from None
+        source = parsed.model_dump(mode="json")
+
+    with _sessions()() as session:
+        session.execute(text(f"""
+            UPDATE {S}.connector SET context_source = CAST(:c AS jsonb), updated_at = now()
+             WHERE org_id = :o AND slug = :s
+        """), {"c": json.dumps(source) if source else None,
+               "o": _org(session), "s": slug})
+        session.commit()
+
+    from ..services.live_context import CACHE
+
+    # The configuration changed, so anything held under the old one describes a
+    # source that no longer exists.
+    CACHE.clear()
+    return {"source": source}
+
+
 @router.get("/api/connectors/{slug}/starters")
 def chat_starters(slug: str) -> dict:
     """Suggestions for an empty chat, drawn from the corpus itself.
@@ -1522,7 +1593,7 @@ def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
 
 
 def _run_answer(platform, question, citations, history, instructions="", synonyms=None,
-                page=None):
+                page=None, data=None):
     """Drive the async answerer from this synchronous stream.
 
     The endpoint is a sync generator because the retrieval pipeline is
@@ -1542,7 +1613,7 @@ def _run_answer(platform, question, citations, history, instructions="", synonym
     async def pump():
         try:
             async for item in platform.answering.stream(
-                question, citations, history, instructions, synonyms, page
+                question, citations, history, instructions, synonyms, page, data
             ):
                 outbox.put(item)
         except Exception as exc:  # noqa: BLE001

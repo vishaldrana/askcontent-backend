@@ -127,6 +127,15 @@ def _embed_for(key: str) -> dict:
     return dict(row)
 
 
+def _context_source_for(slug: str) -> object:
+    from .extra import _sessions
+
+    with _sessions()() as session:
+        return session.execute(text(f"""
+            SELECT context_source FROM {S}.connector WHERE slug = :s
+        """), {"s": slug}).scalar_one_or_none()
+
+
 def _origin_allowed(embed: dict, origin: str | None) -> bool:
     """An empty allowlist permits nothing.
 
@@ -179,6 +188,10 @@ def widget_starters(
     slug = embed["connector"]
     platform = _platform()
     connector = platform.registry.get(slug)
+
+    from ..services.live_context import parse as parse_source
+
+    source = parse_source(_context_source_for(slug))
 
     with _sessions()() as session:
         cid = _connector_id(session, slug)
@@ -259,6 +272,10 @@ async def widget_ask(
     platform = _platform()
     connector = platform.registry.get(slug)
 
+    from ..services.live_context import parse as parse_source
+
+    source = parse_source(_context_source_for(slug))
+
     # The visitor's identity comes from their token, never from the request
     # body. `user` in the body is a display hint and is not trusted for access.
     principal = _principal_from_token(authorization, body.get("user"))
@@ -314,11 +331,41 @@ async def widget_ask(
                 search_at,
             )
 
+            # Live values, if this connector names a source and the question
+            # calls for one. After retrieval, because the corpus answers most
+            # questions and costs nothing extra; before answering, because the
+            # answer has to be able to use them.
+            data = None
+            if source is not None:
+                from ..domain.groundedness import assess
+                from ..services.live_context import read as read_live
+
+                covers = assess(
+                    question, [c.span for c in evidence.citations]
+                ).covered
+                live_at = time.monotonic()
+                data = read_live(
+                    source,
+                    connector_id=slug,
+                    question=question,
+                    key=(page.key if page else ""),
+                    corpus_covers=covers,
+                    visitor_token=authorization.strip(),
+                    fetcher=platform.context_fetcher,
+                )
+                if data is not None:
+                    yield step(
+                        f"Read {data.source}"
+                        + (" · cached" if data.cached else "")
+                        + (" · unavailable" if data.error else ""),
+                        live_at,
+                    )
+
             answer_at = time.monotonic()
             outcome = None
             for chunk, result in _run_answer(
                 platform, question, evidence.citations, (),
-                _instructions_for(slug), evidence.trace.synonyms, page,
+                _instructions_for(slug), evidence.trace.synonyms, page, data,
             ):
                 if result is not None:
                     outcome = result
@@ -332,6 +379,16 @@ async def widget_ask(
             # sentence marked [page] is not backed by anything a reader can
             # open, and the interface has to be able to say so.
             payload["used_page"] = bool(outcome is not None and outcome.used_page)
+            payload["datapoints"] = (
+                [p.model_dump(mode="json") for p in data.points]
+                if data is not None and outcome is not None and outcome.used_data
+                else []
+            )
+            # A source that was called and failed is named, never swallowed. An
+            # answer that silently omits the figures it was meant to include
+            # looks complete and is wrong about the one thing that was asked.
+            if data is not None and data.error:
+                payload["notices"] = list(payload.get("notices") or []) + [data.notice()]
             if outcome is not None and not outcome.supported:
                 # Nothing supported the answer, so nothing may be shown as
                 # supporting it — and the widget refuses to render prose with

@@ -220,6 +220,9 @@ class Connector(Base, PkMixin, TenantMixin, TimestampMixin):
 
     scope: Mapped[dict] = mapped_column(JSONB, nullable=False)
     scope_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: One live source, or none. See design 09 and migration 0019 for why one
+    #: and not a list.
+    context_source: Mapped[dict | None] = mapped_column(JSONB)
     sensitivity_ceiling: Mapped[str] = mapped_column(String(16), default="internal", nullable=False)
 
     access_groups: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)

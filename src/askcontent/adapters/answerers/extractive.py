@@ -71,6 +71,7 @@ class ExtractiveAnswerer(Answerer):
         # without inventing the attribution. The offline fallback answering
         # from documents only is the right degradation.
         page=None,
+        data=None,
     ) -> AsyncIterator[AnswerChunk]:
         asked = _terms(question)
         if not passages or not asked:

@@ -1,6 +1,8 @@
 # 09 · Live context — answering about the page, not just the corpus
 
-**Status**: step 1 built (page context). Steps 2–5 designed, not built.
+**Status**: steps 1–3 built. Steps 4–5 (`every_question`, `service_header`)
+designed, not built — `service_header` is configurable but should stay unused
+until an embed can be origin-locked from the console.
 **Supersedes**: nothing. **Depends on**: 03 (retrieval), the answerer port, the widget contract.
 
 ---
@@ -269,14 +271,32 @@ right.
    find anything in this knowledgebase or on this page."* An answer claiming
    `[page]` when no page was supplied is unsupported, the same treatment as
    citing a passage number that was never offered.
-2. **The `Datapoint` type and its rendering** — with a stub source, in the
-   console's Diagnose screen only. Proves the evidence model before anything
-   calls out.
-3. **`ContextSource` configuration + the fetch**, `forward_visitor` only,
-   `on_demand` only, with the key-pattern check and the timeout. One connector,
-   behind a flag.
-4. **The failure notice and the step frame**, before anyone else is allowed to
-   turn it on.
+2. ~~**The `Datapoint` type and its rendering**~~ — **built**.
+   `domain/datapoint.py` carries `Datapoint`, `DatapointSet`, `FieldMap` and
+   the mapping. Markers are `[d1]`, `[d2]`: lettered so they can never be read
+   as passage numbers, numbered so a reader can tell which value a sentence
+   rests on. The widget draws them in the accent-free warning colour, with the
+   readings listed below the answer under "Survey analytics · read at 20:19" —
+   time rather than a link, because time is the only thing that can truthfully
+   be said about them. A marker naming a value that was never supplied is
+   unsupported, exactly like citing passage 9 of 4.
+3. ~~**`ContextSource` configuration + the fetch**~~ — **built**. Stored per
+   connector (migration 0019, one column, nullable — so the feature is off by
+   construction rather than by a flag somebody must leave alone). Configured
+   from the console's Settings screen. `should_fetch` is a pure function and
+   the routing rule is: the question points at the reader's own view, or the
+   corpus did not cover it — and always, a key must be present. The key
+   pattern is checked *before* the call, so a crafted request is a refusal
+   rather than an outbound request carrying an attacker's id. Responses over
+   256 KB, non-JSON responses and non-HTTP schemes are refused by the adapter.
+4. ~~**The failure notice and the step frame**~~ — **built**. A source that
+   fails is named in the answer ("Answered from the knowledgebase only — Survey
+   analytics did not respond") and notices now survive a refusal, which is the
+   case that proved they had to: with the source down the reader was told the
+   answer could not be checked and *not* told the figures were unreachable,
+   which is the more useful of the two facts and the one explaining the other.
+   Failures are never cached — a cached timeout turns one bad second into a
+   minute of them.
 5. **`every_question` and `service_header`** — last, because they are the two
    choices that are hardest to walk back.
 

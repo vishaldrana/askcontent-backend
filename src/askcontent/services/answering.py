@@ -30,6 +30,8 @@ class AnswerOutcome:
     #: True when the answer rests, in part or whole, on what the host's page
     #: is showing rather than on a document.
     used_page: bool = False
+    #: Datapoint numbers the answer used.
+    used_data: tuple[int, ...] = ()
     #: Set when the answerer itself failed — a timeout, a rate limit, an
     #: outage.
     #:
@@ -74,10 +76,15 @@ class AnsweringService:
         instructions: str = "",
         synonyms: dict[str, tuple[str, ...]] | None = None,
         page=None,
+        data=None,
     ) -> AsyncIterator[tuple[str, AnswerOutcome | None]]:
         """Yield `(text, None)` while writing, then one final `("", outcome)`."""
         passages = to_passages(citations)
         has_page = page is not None and getattr(page, "usable", False)
+        has_data = data is not None and getattr(data, "usable", False)
+        offered_data = (
+            {p.number for p in data.points} if has_data else set()
+        )
 
         # The page counts towards coverage, and it has to.
         #
@@ -89,16 +96,23 @@ class AnsweringService:
         # it is still refused.
         verdict = assess(
             question,
-            [p.text for p in passages] + ([page.render()] if has_page else []),
+            [p.text for p in passages]
+            + ([page.render()] if has_page else [])
+            + ([data.render()] if has_data else []),
             floor=self._floor, synonyms=synonyms,
         )
         if not verdict.covered:
             # Refused before the answerer is even called. Calling it and hoping
             # it declines would be paying for a judgement already made, and
             # would fail open if the model were unavailable.
+            where = ["in this knowledgebase"]
+            if has_page:
+                where.append("on this page")
+            if has_data:
+                where.append("in the live figures")
             message = (
-                "I could not find anything in this knowledgebase"
-                + (" or on this page" if has_page else "")
+                "I could not find anything "
+                + (", ".join(where[:-1]) + " or " + where[-1] if len(where) > 1 else where[0])
                 + " that answers that question."
             )
             for word in message.split(" "):
@@ -113,6 +127,7 @@ class AnsweringService:
         async for chunk in self.answerer.stream(
             question=question, passages=passages, history=history,
             instructions=instructions, page=page if has_page else None,
+            data=data if has_data else None,
         ):
             if chunk.text:
                 said += chunk.text
@@ -131,19 +146,35 @@ class AnsweringService:
                 # defect as citing passage 9 of 4 and is treated the same way.
                 page_claimed = chunk.used_page and has_page
                 fabricated_page = chunk.used_page and not has_page
-                uncited = bool(said.strip()) and not chunk.cited and not page_claimed
+                # A datapoint marker naming a value that was never supplied is
+                # the same defect as citing passage 9 of 4, and gets the same
+                # answer. Checked against what was offered rather than against
+                # a count, because a source returning three values where it
+                # returned five yesterday is normal.
+                fabricated_data = tuple(sorted(set(chunk.used_data) - offered_data))
+                data_claimed = bool(set(chunk.used_data) & offered_data)
+                uncited = (
+                    bool(said.strip())
+                    and not chunk.cited
+                    and not page_claimed
+                    and not data_claimed
+                )
                 outcome = AnswerOutcome(
                     supported=(
                         chunk.supported and not invented and not uncited
-                        and not fabricated_page
+                        and not fabricated_page and not fabricated_data
                     ),
                     cited=chunk.cited,
                     invented=invented,
                     used_page=page_claimed,
+                    used_data=tuple(sorted(set(chunk.used_data) & offered_data)),
                     reason=(
                         "the answer attributed something to a page that was "
                         "never supplied"
                         if fabricated_page else
+                        f"the answer cited live values that were never supplied: "
+                        f"{', '.join(f'd{n}' for n in fabricated_data)}"
+                        if fabricated_data else
                         "the answer cited nothing, so none of it can be checked"
                         if uncited else None
                     ),

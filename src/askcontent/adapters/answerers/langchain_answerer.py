@@ -26,6 +26,9 @@ _NOT_IN_CORPUS = re.compile(r"^\s*NOT_IN_CORPUS\s*:\s*", re.I)
 #: rather than a number, so it can never collide with a passage number and a
 #: reader can tell the two apart in the prose without a legend.
 _PAGE_CITATION = re.compile(r"\[page\]", re.IGNORECASE)
+#: `[d1]` — a live value. Lettered so it can never be read as a passage number,
+#: which is the one ambiguity that would let the two kinds of evidence blur.
+_DATA_CITATION = re.compile(r"\[d(\d{1,2})\]", re.IGNORECASE)
 _CITATION = re.compile(r"\[(\d+)\]")
 
 #: Long enough to contain the marker, short enough that the reader does not
@@ -87,6 +90,7 @@ class LangChainAnswerer(Answerer):
         history: Sequence[tuple[str, str]] = (),
         instructions: str = "",
         page=None,
+        data=None,
     ) -> AsyncIterator[AnswerChunk]:
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -102,7 +106,7 @@ class LangChainAnswerer(Answerer):
 
         messages = [
             SystemMessage(content=system_prompt(instructions)),
-            HumanMessage(content=render(question, passages, history, page)),
+            HumanMessage(content=render(question, passages, history, page, data)),
         ]
 
         buffered = ""
@@ -143,7 +147,9 @@ class LangChainAnswerer(Answerer):
         cited = tuple(sorted({int(n) for n in _CITATION.findall(buffered)}))
         yield AnswerChunk(
             done=True, supported=True, cited=cited,
-            used_page=bool(_PAGE_CITATION.search(buffered)), usage=usage,
+            used_page=bool(_PAGE_CITATION.search(buffered)),
+            used_data=tuple(sorted({int(n) for n in _DATA_CITATION.findall(buffered)})),
+            usage=usage,
         )
 
 
