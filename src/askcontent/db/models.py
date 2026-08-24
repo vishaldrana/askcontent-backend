@@ -236,6 +236,8 @@ class Connector(Base, PkMixin, TenantMixin, TimestampMixin):
     reranker: Mapped[str | None] = mapped_column(String(32))
     #: The model the reranker uses, where it takes one.
     rerank_model: Mapped[str | None] = mapped_column(String(120))
+    #: Deep research configuration, or null for a connector that has none.
+    research: Mapped[dict | None] = mapped_column(JSONB)
     sensitivity_ceiling: Mapped[str] = mapped_column(String(16), default="internal", nullable=False)
 
     access_groups: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)

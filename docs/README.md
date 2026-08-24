@@ -17,7 +17,7 @@ not have to guess.
 | Where | What |
 | --- | --- |
 | `design/` | What the system is and why. Numbered in the order the pieces were designed, not the order they were built. |
-| `engineering/` | How it is run: the decision log, production readiness, reranking. |
+| `engineering/` | How it is run: the decision log, production readiness, reranking, deep research. |
 | `console/` | The admin application — its HTTP contract, its screens, its design system. |
 | `widget/` | The embeddable assistant — its contract and its sequence. |
 | `sample-data/` | The corpora used for demonstration and evaluation. |

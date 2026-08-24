@@ -1011,6 +1011,7 @@ class AnsweringPatch(BaseModel):
     answer_tone: str | None = None
     reranker: str | None = None
     rerank_model: str | None = None
+    research: dict | None = None
 
 
 @router.get("/api/connectors/{slug}/answering")
@@ -1019,17 +1020,20 @@ def get_answering(slug: str) -> dict:
 
     with _sessions()() as session:
         row = session.execute(text(f"""
-            SELECT answer_model, answer_tone, reranker, rerank_model
+            SELECT answer_model, answer_tone, reranker, rerank_model, research
               FROM {S}.connector WHERE org_id = :o AND slug = :s
         """), {"o": _org(session), "s": slug}).mappings().one()
 
     from ..adapters.rerankers.pool import CHOICES
+    from ..domain.research import DEPTH_PRESETS, resolve_config
 
     return dict(row) | {
         "presets": presets(),
         "default_tone": DEFAULT,
         "max_chars": MAX_CHARS,
         "rerankers": list(CHOICES),
+        "research": resolve_config(row["research"]),
+        "depths": list(DEPTH_PRESETS),
     }
 
 
@@ -1075,9 +1079,11 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
                    answer_tone = coalesce(:t, answer_tone),
                    reranker = :rr,
                    rerank_model = :rm,
+                   research = coalesce(CAST(:research AS jsonb), research),
                    updated_at = now()
              WHERE org_id = :o AND slug = :s
         """), {"m": model, "t": tone, "rr": reranker, "rm": rerank_model,
+               "research": json.dumps(body.research) if body.research is not None else None,
                "o": org, "s": slug})
         session.commit()
 
@@ -1088,6 +1094,7 @@ def set_answering(slug: str, body: AnsweringPatch) -> dict:
     return {
         "answer_model": model, "answer_tone": tone,
         "reranker": reranker, "rerank_model": rerank_model,
+        "research": body.research,
     }
 
 
@@ -2022,6 +2029,18 @@ class AskStream(BaseModel):
     #: screen; asking as an ad-hoc principal would let the console invent an
     #: identity the platform never granted.
     role: str | None = None
+    #: Run this turn as deep research instead of a single answer. Per turn
+    #: rather than per thread, because it is a decision about *this question* —
+    #: a research run on "how do I reset my password" costs minutes to produce
+    #: what the ordinary path produces in two seconds.
+    research: bool = False
+
+
+def _research_config_for(slug: str) -> dict | None:
+    with _sessions()() as session:
+        return session.execute(text(f"""
+            SELECT research FROM {S}.connector WHERE slug = :s
+        """), {"s": slug}).scalar_one_or_none()
 
 
 def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
@@ -2247,6 +2266,95 @@ def _rules_for_role(slug: str, role: str | None) -> tuple:
     )
 
 
+def _research_turn(platform, connector, body, principal, started):
+    """One research run, as chat events.
+
+    The phases become steps, the report becomes tokens, and the passages
+    become the same citation list an ordinary answer carries. A reader who
+    turns this on gets a longer answer with more sources, not a different
+    screen — which is the point: the evidence rules did not change, only how
+    much work went into finding it.
+    """
+    from ..domain.research import resolve_config
+    from ..services.research import run as run_research
+
+    config = resolve_config(_research_config_for(body.connector_id))
+    if not config.get("enabled"):
+        yield _sse({"type": "error",
+                    "message": "Deep research is not enabled for this knowledgebase."})
+        yield _sse({"type": "done"})
+        return
+
+    _, tone = _answering_for(body.connector_id)
+    phases = [
+        ("plan", "Planning the investigation"),
+        ("investigate", "Investigating each part"),
+        ("synthesise", "Writing the report"),
+    ]
+    yield _sse({"type": "tool_start", "name": phases[0][0], "label": phases[0][1]})
+
+    report = None
+    findings = 0
+    for event, payload in run_research(
+        platform, connector, body.question,
+        principal=principal,
+        config=_research_config_for(body.connector_id),
+        role_rules=_rules_for_role(body.connector_id, body.role),
+        glossary=_glossary_for(body.connector_id),
+        instructions=_instructions_for(body.connector_id),
+        tone=tone,
+    ):
+        if event == "plan":
+            yield _sse({"type": "tool_end", "name": "plan", "label": phases[0][1],
+                        "status": "ok",
+                        "detail": " · ".join(q.question for q in payload)})
+            yield _sse({"type": "tool_start", "name": "investigate",
+                        "label": phases[1][1]})
+        elif event == "finding":
+            findings += 1
+            yield _sse({"type": "tool_end", "name": "investigate",
+                        "label": phases[1][1], "status": "ok",
+                        "detail": f"{findings} answered"})
+            yield _sse({"type": "tool_start", "name": "investigate",
+                        "label": phases[1][1]})
+        elif event == "limit":
+            # A limit reached is reported, never logged. A run that quietly
+            # stopped and wrote a confident report is the failure the whole
+            # design is against.
+            yield _sse({"type": "tool_end", "name": payload.name,
+                        "label": f"Stopped: {payload.name}", "status": "warn",
+                        "detail": payload.detail})
+        elif event == "token":
+            yield _sse({"type": "token", "text": payload})
+        elif event == "report":
+            report = payload
+
+    yield _sse({"type": "tool_end", "name": "investigate", "label": phases[1][1],
+                "status": "ok", "detail": f"{findings} sub-questions"})
+
+    yield _sse({
+        "type": "complete",
+        "citations": [
+            c.model_dump(mode="json") for c in (report.citations if report else ())
+        ],
+        "conflicts": [], "notices": [
+            limit.detail for limit in (report.limits if report else ())
+        ],
+        "refused": not (report and report.grounded),
+        "refusal_reason": None if (report and report.grounded)
+        else "nothing in this knowledgebase supported a report on that",
+        "followups": [],
+        "answered_by": {"provider": "research", "model": config["depth"],
+                        "grounded": bool(report and report.grounded)},
+        "research": (
+            report.model_dump(mode="json", exclude={"citations"}) if report else None
+        ),
+    })
+    yield _sse({"type": "timing",
+                "elapsed_ms": (dt.datetime.now() - started).total_seconds() * 1000})
+    yield _sse({"type": "done"})
+
+
 @router.post("/api/chat/stream")
 def chat_stream(body: AskStream):
     """The answer stream.
@@ -2275,6 +2383,14 @@ def chat_stream(body: AskStream):
     def generate():
         started = dt.datetime.now()
         try:
+            # Deep research is a different shape of turn, not a different
+            # endpoint. It emits the same events — steps, tokens, a complete
+            # frame with citations — so everything that renders an answer
+            # renders a report without knowing which it got.
+            if body.research:
+                yield from _research_turn(platform, connector, body, principal, started)
+                return
+
             # Questions about the corpus are answered from the corpus's shape,
             # not from a passage in it. Checked first because there is nothing
             # for retrieval to do.
