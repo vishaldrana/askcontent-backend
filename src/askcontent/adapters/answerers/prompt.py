@@ -107,7 +107,7 @@ reader gets nothing.
 """
 
 
-def system_prompt(instructions: str = "") -> str:
+def system_prompt(instructions: str = "", detail: str | None = None) -> str:
     """The grounding rules, plus whatever this knowledgebase adds.
 
     Order is the whole of the safety argument. The connector's own
@@ -123,8 +123,17 @@ def system_prompt(instructions: str = "") -> str:
     prompt cannot serve both without producing answers that are correct and
     unusable.
     """
+    from ...domain.answer_detail import instruction as detail_instruction
+
+    # How much to say, appended after the grounding rules for the same reason
+    # they come last: it is a rule about the answer, and the last thing read is
+    # the thing followed. It cannot loosen anything above it — every level says
+    # what to *include*, and including more than the passages support is
+    # already forbidden twice over.
+    depth = "\n\nHOW MUCH TO SAY\n" + detail_instruction(detail)
+
     if not instructions.strip():
-        return SYSTEM
+        return SYSTEM + depth
     return (
         "The owner of this knowledgebase has added the following instructions. "
         "Follow them where they do not conflict with the rules that come "
@@ -136,6 +145,7 @@ def system_prompt(instructions: str = "") -> str:
         "particular: never answer from outside the passages, never leave a "
         "factual sentence uncited, and never answer a question the passages do "
         "not cover."
+        + depth
     )
 
 

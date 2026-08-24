@@ -76,9 +76,22 @@ def to_passages(citations) -> list[Passage]:
 
 
 class AnsweringService:
-    def __init__(self, answerer, *, relevance_floor: float = 0.34) -> None:
+    def __init__(self, answerer, *, relevance_floor: float = 0.34, pool=None) -> None:
         self.answerer = answerer
         self._floor = relevance_floor
+        #: Resolves a model id to an answerer. Injected, because building one
+        #: means naming a vendor SDK and this layer is not allowed to — the
+        #: same rule that keeps every other adapter out of here, and a test
+        #: asserts it. Absent, every connector answers with the one model this
+        #: service was built with, which is what the product did before
+        #: connectors could choose.
+        self._pool = pool
+
+    def _for(self, model_id: str | None):
+        """The answerer a connector asked for, or the one we were built with."""
+        if self._pool is None or not model_id:
+            return self.answerer
+        return self._pool(model_id, self.answerer)
 
     async def stream(
         self,
@@ -89,6 +102,8 @@ class AnsweringService:
         synonyms: dict[str, tuple[str, ...]] | None = None,
         page=None,
         data=None,
+        detail: str | None = None,
+        model: str | None = None,
     ) -> AsyncIterator[tuple[str, AnswerOutcome | None]]:
         """Yield `(text, None)` while writing, then one final `("", outcome)`."""
         passages = to_passages(citations)
@@ -136,10 +151,10 @@ class AnsweringService:
         outcome: AnswerOutcome | None = None
         said = ""
 
-        async for chunk in self.answerer.stream(
+        async for chunk in self._for(model).stream(
             question=question, passages=passages, history=history,
             instructions=instructions, page=page if has_page else None,
-            data=data if has_data else None,
+            data=data if has_data else None, detail=detail,
         ):
             if chunk.text:
                 said += chunk.text

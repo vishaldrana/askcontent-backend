@@ -247,6 +247,7 @@ async def widget_ask(
 ):
     from .extra import (
         _answer_about_the_corpus,
+        _answering_for,
         _glossary_for,
         _instructions_for,
         _principal_for_role,
@@ -388,9 +389,11 @@ async def widget_ask(
 
             answer_at = time.monotonic()
             outcome = None
+            answer_model, answer_detail = _answering_for(slug)
             for chunk, result in _run_answer(
                 platform, question, evidence.citations, (),
                 _instructions_for(slug), evidence.trace.synonyms, page, data,
+                answer_detail, answer_model,
             ):
                 if result is not None:
                     outcome = result

@@ -902,6 +902,121 @@ def scope_facets(slug: str) -> dict:
     }
 
 
+#: What a fresh deployment can answer with. Seeded rather than left empty
+#: because an empty catalogue is a dropdown with nothing in it, and the first
+#: question anybody has is "which ones do you support" — which is exactly what
+#: this list is.
+SEED_MODELS = [
+    ("openai", "gpt-4.1-2025-04-14", "GPT-4.1", "The default. Best balance for grounded answers.", True),
+    ("openai", "gpt-4.1-mini-2025-04-14", "GPT-4.1 mini", "Faster and cheaper; shorter answers.", False),
+    ("openai", "gpt-4o-2024-11-20", "GPT-4o", "Older, still capable.", False),
+    ("anthropic", "claude-sonnet-4-5", "Claude Sonnet 4.5", "Needs an Anthropic key.", False),
+    ("anthropic", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast; needs an Anthropic key.", False),
+]
+
+
+@router.get("/api/models")
+def list_models(kind: str = "answer") -> dict:
+    """What this deployment may answer with.
+
+    From the database rather than a constant, so adding a model is a row and
+    not a release — and so the name a person picks from ("GPT-4.1") can differ
+    from the identifier the vendor wants ("gpt-4.1-2025-04-14"), which is the
+    whole reason the two are separate columns.
+    """
+    with _sessions()() as session:
+        org = _org(session)
+        rows = session.execute(text(f"""
+            SELECT vendor, model_id, name, note, is_default
+              FROM {S}.model_catalog
+             WHERE org_id = :o AND kind = :k AND enabled
+             ORDER BY ordinal, vendor, name
+        """), {"o": org, "k": kind}).mappings().all()
+
+        if not rows:
+            for ordinal, (vendor, model_id, name, note, default) in enumerate(SEED_MODELS):
+                session.execute(text(f"""
+                    INSERT INTO {S}.model_catalog
+                        (org_id, kind, vendor, model_id, name, note, is_default, ordinal)
+                    VALUES (:o, 'answer', :v, :m, :n, :note, :d, :ord)
+                    ON CONFLICT (org_id, kind, vendor, model_id) DO NOTHING
+                """), {"o": org, "v": vendor, "m": model_id, "n": name,
+                       "note": note, "d": default, "ord": ordinal})
+            session.commit()
+            rows = session.execute(text(f"""
+                SELECT vendor, model_id, name, note, is_default
+                  FROM {S}.model_catalog
+                 WHERE org_id = :o AND kind = :k AND enabled
+                 ORDER BY ordinal, vendor, name
+            """), {"o": org, "k": kind}).mappings().all()
+
+    return {"models": [dict(r) for r in rows]}
+
+
+class AnsweringPatch(BaseModel):
+    answer_model: str | None = None
+    answer_detail: str | None = None
+
+
+@router.get("/api/connectors/{slug}/answering")
+def get_answering(slug: str) -> dict:
+    from ..domain.answer_detail import LEVELS
+
+    with _sessions()() as session:
+        row = session.execute(text(f"""
+            SELECT answer_model, answer_detail FROM {S}.connector
+             WHERE org_id = :o AND slug = :s
+        """), {"o": _org(session), "s": slug}).mappings().one()
+    return dict(row) | {"levels": list(LEVELS)}
+
+
+@router.put("/api/connectors/{slug}/answering")
+def set_answering(slug: str, body: AnsweringPatch) -> dict:
+    """Which model answers, and how much it says.
+
+    An unknown model is refused rather than stored. Stored, it would be a
+    connector that silently answers with the deployment default while its
+    settings screen says otherwise — the kind of disagreement nobody finds
+    until they are comparing two answers and cannot explain the difference.
+    """
+    from ..domain.answer_detail import LEVELS
+
+    detail = body.answer_detail
+    if detail is not None and detail not in LEVELS:
+        raise HTTPException(400, f"detail must be one of {', '.join(LEVELS)}")
+
+    model = (body.answer_model or "").strip() or None
+    with _sessions()() as session:
+        org = _org(session)
+        if model:
+            known = session.execute(text(f"""
+                SELECT 1 FROM {S}.model_catalog
+                 WHERE org_id = :o AND model_id = :m AND kind = 'answer' AND enabled
+            """), {"o": org, "m": model}).scalar_one_or_none()
+            if not known:
+                raise HTTPException(400, f"{model} is not in this deployment's model catalogue")
+        session.execute(text(f"""
+            UPDATE {S}.connector
+               SET answer_model = :m,
+                   answer_detail = coalesce(:d, answer_detail),
+                   updated_at = now()
+             WHERE org_id = :o AND slug = :s
+        """), {"m": model, "d": detail, "o": org, "s": slug})
+        session.commit()
+    return {"answer_model": model, "answer_detail": detail}
+
+
+def _answering_for(slug: str) -> tuple[str | None, str]:
+    """The model and detail level this connector answers with."""
+    with _sessions()() as session:
+        row = session.execute(text(f"""
+            SELECT answer_model, answer_detail FROM {S}.connector WHERE slug = :s
+        """), {"s": slug}).mappings().one_or_none()
+    if row is None:
+        return None, "full"
+    return row["answer_model"], row["answer_detail"] or "full"
+
+
 class ConnectorCreate(BaseModel):
     """What the wizard collects, and nothing else.
 
@@ -1748,7 +1863,7 @@ def _age_notices(citations, cited: tuple[int, ...]) -> list[str]:
 
 
 def _run_answer(platform, question, citations, history, instructions="", synonyms=None,
-                page=None, data=None):
+                page=None, data=None, detail=None, model=None):
     """Drive the async answerer from this synchronous stream.
 
     The endpoint is a sync generator because the retrieval pipeline is
@@ -1768,7 +1883,8 @@ def _run_answer(platform, question, citations, history, instructions="", synonym
     async def pump():
         try:
             async for item in platform.answering.stream(
-                question, citations, history, instructions, synonyms, page, data
+                question, citations, history, instructions, synonyms, page, data,
+                detail, model,
             ):
                 outbox.put(item)
         except Exception as exc:  # noqa: BLE001
@@ -2052,10 +2168,12 @@ def chat_stream(body: AskStream):
                 if turn.get("question")
             ]
             outcome = None
+            answer_model, answer_detail = _answering_for(body.connector_id)
             for text, result in _run_answer(
                 platform, body.question, evidence.citations, history,
                 _instructions_for(body.connector_id),
                 evidence.trace.synonyms,
+                None, None, answer_detail, answer_model,
             ):
                 if result is not None:
                     outcome = result

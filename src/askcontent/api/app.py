@@ -482,12 +482,14 @@ def diagnose(connector_id: str, body: dict) -> dict:
     # than a window onto an intermediate stage.
     if body.get("answer", True):
         from ..domain.followups import suggest as suggest_followups
-        from .extra import _instructions_for, _run_answer
+        from .extra import _answering_for, _instructions_for, _run_answer
 
         text_out, outcome = "", None
+        answer_model, answer_detail = _answering_for(connector_id)
         for chunk, result in _run_answer(
             platform, spec.question, evidence.citations, (),
             _instructions_for(connector_id), evidence.trace.synonyms,
+            None, None, answer_detail, answer_model,
         ):
             if result is not None:
                 outcome = result

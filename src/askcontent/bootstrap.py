@@ -16,6 +16,7 @@ from .adapters.index.mock_pgp import MockPgpIndex
 from .adapters.repository.mock_ecm import MockEcmRepository
 from .adapters.rerankers.lexical import LexicalReranker
 from .adapters.answerers import build_answerer
+from .adapters.answerers.pool import for_model as answerer_for
 from .domain.catalog import AuthorityRule, FreshnessPolicy
 from .services.answering import AnsweringService
 from .domain.documents import AuthorityTier, Sensitivity
@@ -151,7 +152,7 @@ def build_postgres(org_slug: str = "demo") -> "Platform":
     return Platform(
         index=index, repository=repository, embedder=embedder, reranker=reranker,
         passages=passages, retrieval=retrieval, registry=registry,
-        answering=AnsweringService(build_answerer()),
+        answering=AnsweringService(build_answerer(), pool=answerer_for),
         context_fetcher=HttpContextFetcher(),
     )
 
@@ -435,29 +436,6 @@ def _seed_connectors(platform: Platform) -> None:
             authority=(
                 AuthorityRule(label="approved", tier=AuthorityTier.AUTHORITATIVE),
             ),
-            state=ConnectorState.ACTIVE,
-        ),
-        dict(
-            # Built by crawling a real public help centre rather than seeded
-            # from a fixture: the pages, their titles and their dates all came
-            # off help.qwary.com. It is here to prove the whole path — crawl,
-            # publish, index, answer — against content nobody wrote for us.
-            connector_id="cn-qwary-help",
-            name="Qwary Help Centre — product documentation",
-            business_group="Customer Support",
-            kb_id="kb-qwary-help", space="QWARY_HELP",
-            exclude=(),
-            groups=("group:all-staff",),
-            ceiling=Sensitivity.PUBLIC,
-            authority=(),
-            # Reference documentation ages differently from a policy library.
-            # A page describing how to add a hyperlink was written once and is
-            # still correct; the default three-year expiry archived 32 of 34
-            # candidates for one question and answered from the two survivors,
-            # which is worse than saying nothing. Ageing still flags them.
-            retrieval={"freshness": FreshnessPolicy(
-                ageing_days=540, stale_days=1095, expired_days=3650
-            )},
             state=ConnectorState.ACTIVE,
         ),
         dict(

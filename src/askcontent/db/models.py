@@ -223,6 +223,11 @@ class Connector(Base, PkMixin, TenantMixin, TimestampMixin):
     #: One live source, or none. See design 09 and migration 0019 for why one
     #: and not a list.
     context_source: Mapped[dict | None] = mapped_column(JSONB)
+    #: Which catalogued model answers for this connector. Null is the
+    #: deployment default, so an unset column keeps the previous behaviour.
+    answer_model: Mapped[str | None] = mapped_column(String(120))
+    #: How much of what the passages support the answer should say.
+    answer_detail: Mapped[str] = mapped_column(String(16), default="full", nullable=False)
     sensitivity_ceiling: Mapped[str] = mapped_column(String(16), default="internal", nullable=False)
 
     access_groups: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)

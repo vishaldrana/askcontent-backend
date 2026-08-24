@@ -89,6 +89,7 @@ class Answerer(Protocol):
         instructions: str = "",
         page: object | None = None,
         data: object | None = None,
+        detail: str | None = None,
     ) -> AsyncIterator[AnswerChunk]:
         """Stream a grounded answer.
 

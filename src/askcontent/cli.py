@@ -89,8 +89,8 @@ def reembed(connector_id: str | None = None, scope: str | None = None) -> int:
     """Rebuild vectors from the chunks already stored.
 
         askcontent reembed                    every chunk missing one
-        askcontent reembed cn-qwary-help      one connector
-        askcontent reembed cn-qwary-help all  every chunk, not just the missing
+        askcontent reembed cn-wells-fargo-help-centre
+        askcontent reembed <connector> all    every chunk, not just the missing
 
     The step after loading sql/data.sql, which carries the corpus and not its
     vectors. Until this has run, the vector channel returns nothing and answers
@@ -180,7 +180,7 @@ def evals() -> int:
     that fails a build is one somebody fixes. This is what belongs in CI after
     any change to retrieval, chunking, the prompt or a model.
 
-        python -m askcontent.cli evals cn-qwary-help
+        python -m askcontent.cli evals cn-wells-fargo-help-centre
     """
     import sys
 
