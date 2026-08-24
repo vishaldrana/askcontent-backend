@@ -31,22 +31,27 @@ def test_the_unit_alone_does_not_say_what_is_measured():
     # The two that produced "Sources disagree — days your (days)" over a page
     # about due-date criteria and a page about autopay timing. Same unit,
     # different measure, no contradiction.
-    assert _measure("days", " past due, your account is current") != _measure(
-        "days", " before the automatic payment is scheduled"
+    assert _measure("days", after=" past due, your account is current") != _measure(
+        "days", after=" before the automatic payment is scheduled"
     )
 
 
 def test_the_same_measure_is_recognised_through_the_filler():
-    assert _measure("days", " past due") == _measure("days", " past due and the")
+    assert _measure("days", after=" past due") == _measure("days", after=" past due and the")
 
 
 def test_a_measure_ignores_words_that_qualify_nothing():
     # "your", "the", "will" say nothing about what is being counted.
-    assert _measure("days", " your notice period") == "days notice period"
+    assert _measure("days", after=" your notice period") == "days notice period"
 
 
-def test_currency_takes_its_measure_from_what_follows():
-    assert _measure("currency", " monthly maintenance fee") == "currency monthly maintenance"
+def test_an_amount_is_named_before_it_not_after():
+    # "$35" says nothing on its own; "an overdraft fee of $35" does. Reading
+    # forward from the amount finds the verb, and a policy that "assesses" a
+    # fee stops matching a guide that "charges" one.
+    policy = _measure("currency", before="An overdraft fee of ")
+    guide = _measure("currency", before="An overdraft fee of ")
+    assert policy == guide == "currency overdraft fee"
 
 
 # ------------------------------------------------------------- end to end ---

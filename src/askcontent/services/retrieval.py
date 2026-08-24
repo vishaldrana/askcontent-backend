@@ -899,7 +899,7 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
             ) or tokens
             claims.append((
                 citation, value, "currency", window,
-                _measure("currency", text[match.end():]),
+                _measure("currency", before=text[max(0, match.start() - 80):match.start()]),
             ))
 
         for match in _CLAIM.finditer(text):
@@ -913,7 +913,7 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
             ) or tokens
             claims.append((
                 citation, value, unit, window,
-                _measure(unit, text[match.end():]),
+                _measure(unit, after=text[match.end():]),
             ))
 
     conflicts: list[Conflict] = []
@@ -973,24 +973,41 @@ def _detect_conflicts(citations: list[Citation]) -> list[Conflict]:
 _CONFLICT_MIN_SHARED = 3
 _CONFLICT_MIN_RATIO = 0.25
 
-#: Words that qualify a number without saying what it measures.
+#: Words that qualify a number without saying what it measures — articles,
+#: prepositions, possessives, and the verbs a document uses to introduce a
+#: figure. The verbs matter: "$35 is *assessed* per item" and "$15 is
+#: *charged* per item" are the same measure written by two authors, and a
+#: measure that includes the verb makes them look like different subjects.
 _MEASURE_STOP = frozenset(
     "the a an of to and or in on for with by from at as is are was were be "
-    "will may can your you our their this that these those it its".split()
+    "will may can your you our their this that these those it its per each "
+    "assessed charged applied added billed costs cost amount amounts apply "
+    "applies when where which that than more less up".split()
 )
 
 
-def _measure(unit: str, following: str) -> str:
-    """What the number measures: its unit plus the words that qualify it.
+def _measure(unit: str, before: str = "", after: str = "") -> str:
+    """What the number measures — not merely what it is counted in.
 
-    "10 days past due" and "3 business days" are both quantities in days and
-    are not comparable — the unit alone cannot tell them apart, and the words
-    around it can. Two are taken because one is usually a preposition and
-    three starts pulling in the next clause.
+    "10 days past due" and "3 business days before" are both quantities in
+    days and are not comparable; the unit alone cannot tell them apart and the
+    words around it can.
+
+    Which side those words are on depends on the kind of quantity, and getting
+    this wrong is not a detail. A unit names itself and is qualified by what
+    follows: "days past due". An amount does not — "$35" says nothing, and the
+    thing it measures is named *before* it: "an overdraft fee of $35". Reading
+    forward from the amount finds the verb instead, so a policy saying a fee is
+    "assessed" and a guide saying it is "charged" stopped being a contradiction
+    about overdraft fees and became two unrelated figures.
     """
     import re
 
-    words = [w for w in re.findall(r"[a-z]+", following.lower())][:4]
+    if unit == "currency":
+        words = [w for w in re.findall(r"[a-z]+", before.lower()) if w not in _MEASURE_STOP]
+        return " ".join(["currency", *words[-2:]]).strip()
+
+    words = [w for w in re.findall(r"[a-z]+", after.lower())][:5]
     tail = [w for w in words if w not in _MEASURE_STOP][:2]
     return " ".join([unit, *tail]).strip()
 
