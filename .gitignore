@@ -5,3 +5,7 @@ __pycache__/
 dist/
 
 .env
+
+# Full-database exports (tools + pg_dump): operational history, chat turns,
+# embeddings and the 125 MB ecm_stub corpus. Regenerable; not repo material.
+sql/export/

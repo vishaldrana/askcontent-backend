@@ -78,6 +78,7 @@ TABLES = [
     "askcontent_document",
     "askcontent_document_chunk",
     "askcontent_glossary_term",
+    "askcontent_model_catalog",
     "askcontent_eval_case",
     "askcontent_embed",
     "askcontent_upload",
