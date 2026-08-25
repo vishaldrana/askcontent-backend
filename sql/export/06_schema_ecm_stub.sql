@@ -11,6 +11,8 @@
 -- Name: ecm_stub; Type: SCHEMA; Schema: -; Owner: -
 --
 
+DROP SCHEMA IF EXISTS ecm_stub CASCADE;
+
 CREATE SCHEMA ecm_stub;
 
 --
